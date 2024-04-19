@@ -10,6 +10,7 @@ int FencereaderPinRight = A7;
 
 // IR sensor
 int IrSensorPin = A5;
+volatile byte IrStateCode = LOW;
 
 // bumper buttons
 int BumperButtonLeft = A3;
@@ -175,6 +176,8 @@ void ReadIrSensor(){
   Serial.println(analogIr);
   Serial.println("IR digitalIr ");
   Serial.println(digitalIr);
+  Serial.println("IR IrStateCode ");
+  Serial.println(IrStateCode);
   delay(50);
 }
 
@@ -197,11 +200,14 @@ boolean ReadFenceSensors(){
 }
 
 
+void blink() {
+  IrStateCode = !IrStateCode;
+}
+
 // Setup robot microcontroller initial state.
 void setup()
 {  
   Serial.begin(115200);
-  delay(5000);
   SetUpMotorPins();
   // Delays the start to give time to the user to walk back.
   //u8x8.begin();
@@ -216,8 +222,9 @@ void setup()
   pinMode(BumperButtonLeft, INPUT_PULLUP);
   pinMode(BumperButtonRight, INPUT_PULLUP);
 
-  pinMode(IrSensorPin, INPUT);
-
+  //pinMode(IrSensorPin, INPUT);
+  pinMode(IrSensorPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(IrSensorPin), blink, CHANGE);
   Navigate();
 }
 
