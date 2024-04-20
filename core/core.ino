@@ -3,14 +3,20 @@
 
 // screen
 //U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(U8X8_PIN_NONE);
+#define IR_SEND_PIN A2
+#include <IRremote.h>
+#include <IRremoteInt.h>
+IRrecv irsend = IRrecv();
 
 // fence readers
 int FencereaderPinLeft = A6;
 int FencereaderPinRight = A7;
 
 // IR sensor
-int IrSensorPin = A5;
-volatile byte IrStateCode = LOW;
+int IrSensorPinRight = A5;
+int IrSensorPinLeft = A4;
+int RecommendedDirectionIr = 0;
+
 
 // bumper buttons
 int BumperButtonLeft = A3;
@@ -20,14 +26,16 @@ volatile byte StateBumperRight = HIGH;
 
 // ultrasonic sensors
 String DistancesDebug = "---------------";
-int sensorLeft =11;
-int sensorCenter = 12;
-int sensorRight = 7;
+int UltrasonicSensorLeft =11;
+int UltrasonicSensorCenter = 12;
+int UltrasonicSensorRight = 7;
 
 // motors
 int GrassCutterPin = A2;
+int DirectionNone = 1;
 int DirectionRight = 1;
 int DirectionLeft = 2;
+int DirectionCenter = 3;
 int RecommendedDirection = 0;
 int MotorSpeeds = 255;
 int MotorPinSpeedRight = 9;
@@ -148,14 +156,21 @@ int ReadSingleUltrasonicSensor(int sensor){
 
 boolean ReadUltrasonicSensor(){
   DistancesDebug = "Dis:";
-  int distanceLeft = ReadSingleUltrasonicSensor(sensorLeft);
-  int distanceCenter = ReadSingleUltrasonicSensor(sensorCenter);
-  int distanceRight = ReadSingleUltrasonicSensor(sensorRight);
+  int distanceLeft = ReadSingleUltrasonicSensor(UltrasonicSensorLeft);
+  int distanceCenter = ReadSingleUltrasonicSensor(UltrasonicSensorCenter);
+  int distanceRight = ReadSingleUltrasonicSensor(UltrasonicSensorRight);
   // Prints the distance on the Serial Monitor
   DistancesDebug = DistancesDebug + distanceLeft+"/";
   DistancesDebug = DistancesDebug + distanceCenter +"/";
   DistancesDebug = DistancesDebug + distanceRight;
-  boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < 30;
+
+  int distanceAllowed = 30;
+  if(CurrentMode == MODE_RETURNING_HOME)
+  {
+    distanceAllowed =  10;
+  }
+
+  boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < distanceAllowed;
   if(collisionDetected)
   {
     if(distanceLeft < distanceRight)
@@ -168,17 +183,36 @@ boolean ReadUltrasonicSensor(){
   return collisionDetected;
 }
 
-void ReadIrSensor(){
-  // IrSensorPin
-  int analogIr = analogRead(IrSensorPin);
-  int digitalIr = digitalRead(IrSensorPin);
-  Serial.println("IR analogIr ");
-  Serial.println(analogIr);
-  Serial.println("IR digitalIr ");
-  Serial.println(digitalIr);
-  Serial.println("IR IrStateCode ");
-  Serial.println(IrStateCode);
-  delay(50);
+bool ReadIrSensor(){
+  int analogIrLeft = analogRead(IrSensorPinLeft);
+  int analogIrRight = analogRead(IrSensorPinRight);
+  int readings = 10;
+  bool detected = false;
+  while(readings)
+  {
+    readings--;
+    if(analogIrLeft < 1000) {
+      Serial.println("IR detected left");
+      detected = true;
+      RecommendedDirectionIr = DirectionLeft;
+    }
+    if(analogIrRight < 1000) {
+      Serial.println("IR detected right");
+      if(detected) {
+        // both sensors detect the base signal, so recommends to move fordwardish.
+        RecommendedDirection = DirectionCenter;
+      }else{
+        RecommendedDirectionIr = DirectionRight;
+      }
+      detected = true;
+    }
+    if(detected)
+      return true;
+    RecommendedDirectionIr = 0;
+    analogIrLeft = analogRead(IrSensorPinLeft);
+    analogIrRight = analogRead(IrSensorPinRight);
+  }
+  return detected;
 }
 
 boolean ReadFenceSensors(){
@@ -200,10 +234,6 @@ boolean ReadFenceSensors(){
 }
 
 
-void blink() {
-  IrStateCode = !IrStateCode;
-}
-
 // Setup robot microcontroller initial state.
 void setup()
 {  
@@ -223,19 +253,19 @@ void setup()
   pinMode(BumperButtonRight, INPUT_PULLUP);
 
   //pinMode(IrSensorPin, INPUT);
-  pinMode(IrSensorPin, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(IrSensorPin), blink, CHANGE);
+  pinMode(IrSensorPinLeft, INPUT);
+  pinMode(IrSensorPinRight, INPUT);
   Navigate();
 }
 
 bool ReadBumperSensors(){
   StateBumperLeft = digitalRead(BumperButtonLeft);
   StateBumperRight = digitalRead(BumperButtonRight);
-  if(StateBumperLeft ==  LOW){
+  if(StateBumperLeft == LOW){
     RecommendedDirection = DirectionRight;
     return true;
   }
-  if(StateBumperRight ==  LOW){
+  if(StateBumperRight == LOW){
     RecommendedDirection = DirectionLeft;
     return true;
   }
@@ -429,12 +459,33 @@ void loop()
   {
     NavigateAndAvoidObstacles("RETURNING HOME");
     // Is home detected?
-    // SetStopWheels();
-    // can it dock?
-    // if yes, start docking proccess
-    // else
-    // RedirectToHome();
-    delay(500);
+    
+    if(ReadIrSensor())
+    {
+      // it detects the base:
+      if(RecommendedDirectionIr == DirectionLeft)
+      {
+        SetMoveLeft();
+        delay(random(500, 1500));
+        SetMoveFront();
+      }
+      else if (RecommendedDirectionIr == DirectionRight)
+      {
+        SetMoveRight();
+        delay(random(500, 1500));
+        SetMoveFront();
+      }
+      else 
+      {
+        // it seems both sensors are looking the target
+        if(ReadUltrasonicSensor()) // it is 10cm at the base
+        {
+          // Stop moving
+          CurrentMode = MODE_CHARGING;
+          SetStopWheels();
+        }
+      }
+    }
   }
   else if(CurrentMode ==  MODE_RESTING)
   {
@@ -454,5 +505,4 @@ void loop()
   SetModeByBatteryPercentage();
   GetSensorState();
   UpdateScreenStats();
-  ReadIrSensor();
 }
