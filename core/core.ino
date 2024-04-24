@@ -3,18 +3,42 @@
 
 // screen
 //U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(U8X8_PIN_NONE);
-#define IR_SEND_PIN A2
 #include <IRremote.h>
 #include <IRremoteInt.h>
 IRrecv irsend = IRrecv();
+
+/*
+Pins used:
+A1: BumperButtonRight
+A2: GrassCutterPin
+A3: BumperButtonLeft
+A4: IrSensorPinLeft
+A5: IrSensorPinRight
+A6: FencereaderPinLeft
+A7: FencereaderPinRight
+D2: MotorPinRight2
+D3: MotorPinRight1
+D4: FREE
+D5: MotorPinLeft2
+D6: MotorPinLeft1
+D7: UltrasonicSensorRight
+D8: FREE
+D9: FREE
+D10: FREE
+D11: UltrasonicSensorLeft
+D12: UltrasonicSensorCenter
+D13: FREE
+
+*/
+
 
 // fence readers
 int FencereaderPinLeft = A6;
 int FencereaderPinRight = A7;
 
 // IR sensor
-int IrSensorPinRight = A5;
-int IrSensorPinLeft = A4;
+int IrSensorPinRight = A4;
+int IrSensorPinLeft = A5;
 int RecommendedDirectionIr = 0;
 
 
@@ -38,8 +62,6 @@ int DirectionLeft = 2;
 int DirectionCenter = 3;
 int RecommendedDirection = 0;
 int MotorSpeeds = 255;
-int MotorPinSpeedRight = 9;
-int MotorPinSpeedLeft = 10;
 
  int MotorPinRight1 = 3;
  int MotorPinRight2 = 2;
@@ -77,15 +99,11 @@ int CurrentBatteryPercentage = 0;
   MOTORS
 */
 void SetUpMotorPins(){
-  pinMode(MotorPinSpeedRight, OUTPUT);
-  pinMode(MotorPinSpeedLeft, OUTPUT);
   pinMode(MotorPinLeft1, OUTPUT);
   pinMode(MotorPinLeft2, OUTPUT);
   pinMode(MotorPinRight1, OUTPUT);
   pinMode(MotorPinRight2, OUTPUT);
   pinMode(GrassCutterPin, OUTPUT);
-  analogWrite(MotorPinSpeedRight, MotorSpeeds);
-  analogWrite(MotorPinSpeedLeft, MotorSpeeds);
 }
 
 void SetStopWheels(){
@@ -95,7 +113,6 @@ void SetStopWheels(){
     analogWrite(MotorPinLeft2, LOW);
     analogWrite(MotorPinRight1, LOW);
     analogWrite(MotorPinRight2, LOW);
-
     delay(3000);
 }
 
@@ -169,7 +186,6 @@ boolean ReadUltrasonicSensor(){
   {
     distanceAllowed =  10;
   }
-
   boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < distanceAllowed;
   if(collisionDetected)
   {
@@ -186,31 +202,36 @@ boolean ReadUltrasonicSensor(){
 bool ReadIrSensor(){
   int analogIrLeft = analogRead(IrSensorPinLeft);
   int analogIrRight = analogRead(IrSensorPinRight);
-  int readings = 10;
+  int readings = 100;
   bool detected = false;
+  RecommendedDirectionIr = DirectionNone;
+  int detectedLeft = 0;
+  int detectedRight = 0;
+  // does multiple readings to make sure both sensors capture data
+  // TODO: replace by interrupts, it will remove the need of loop
   while(readings)
   {
     readings--;
     if(analogIrLeft < 1000) {
-      Serial.println("IR detected left");
       detected = true;
-      RecommendedDirectionIr = DirectionLeft;
+      detectedLeft++;
     }
     if(analogIrRight < 1000) {
-      Serial.println("IR detected right");
-      if(detected) {
-        // both sensors detect the base signal, so recommends to move fordwardish.
-        RecommendedDirection = DirectionCenter;
-      }else{
-        RecommendedDirectionIr = DirectionRight;
-      }
+      Serial.println(analogIrRight);
+      detectedRight++;
       detected = true;
     }
-    if(detected)
-      return true;
     RecommendedDirectionIr = 0;
     analogIrLeft = analogRead(IrSensorPinLeft);
     analogIrRight = analogRead(IrSensorPinRight);
+  }
+  if(detectedLeft>0 && detectedRight>0) {
+    // both sensors detect the base signal, so recommends to move fordwardish.
+    RecommendedDirection = DirectionCenter;
+  } else if (detectedRight){
+    RecommendedDirectionIr = DirectionRight;
+  } else if (detectedLeft){
+    RecommendedDirectionIr = DirectionLeft;
   }
   return detected;
 }
@@ -432,13 +453,14 @@ void SetModeByBatteryPercentage(){
     SetStopWheels();
     PrintScreen("RECHARGING");
   }
-  else if(CurrentBatteryPercentage<40)
+  else if(CurrentBatteryPercentage<40) // TODO: revert to 40
   {
     // look for charging
     if(CurrentMode == MODE_MOWING)
     {
       CurrentMode = MODE_RETURNING_HOME;
       CurrentSubMode = SUB_MODE_NAVIGATING;
+      Serial.println("RETURNING HOME");
     }
   }
 }
@@ -459,23 +481,25 @@ void loop()
   {
     NavigateAndAvoidObstacles("RETURNING HOME");
     // Is home detected?
-    
     if(ReadIrSensor())
     {
+      Serial.println("HOME DETECTED");
       // it detects the base:
       if(RecommendedDirectionIr == DirectionLeft)
       {
         SetMoveLeft();
         delay(random(500, 1500));
+        Serial.println("Move a bit to the left.");
         SetMoveFront();
       }
       else if (RecommendedDirectionIr == DirectionRight)
       {
         SetMoveRight();
         delay(random(500, 1500));
+        Serial.println("Move a bit to the right.");
         SetMoveFront();
       }
-      else 
+      else if (RecommendedDirectionIr == DirectionCenter)
       {
         // it seems both sensors are looking the target
         if(ReadUltrasonicSensor()) // it is 10cm at the base
@@ -483,6 +507,8 @@ void loop()
           // Stop moving
           CurrentMode = MODE_CHARGING;
           SetStopWheels();
+          RecommendedDirectionIr = DirectionNone;
+          Serial.println("parcked for charging!");
         }
       }
     }
