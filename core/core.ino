@@ -23,13 +23,18 @@ D5: MotorPinLeft2
 D6: MotorPinLeft1
 D7: UltrasonicSensorRight
 D8: FREE
-D9: FREE
-D10: FREE
+D9: BlueLedPin
+D10: RedLedPin
 D11: UltrasonicSensorLeft
 D12: UltrasonicSensorCenter
 D13: FREE
 
 */
+
+
+// Light Indicators
+int BlueLedPin = 9;
+int RedLedPin = 10;
 
 
 // fence readers
@@ -107,7 +112,6 @@ void SetUpMotorPins(){
 }
 
 void SetStopWheels(){
-    PrintScreen("Stop Motors.");
     StopCuttingGrass();
     analogWrite(MotorPinLeft1, LOW);
     analogWrite(MotorPinLeft2, LOW);
@@ -136,23 +140,19 @@ void SetMoveRightMotor(int direction){
 }
 
 void SetMoveLeft(){
-  PrintScreen("Move Left");
   SetMoveLeftMotor(1);
   SetMoveRightMotor(-1);
 }
 void SetMoveRight(){
-  PrintScreen("Move right");
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(1);
 }
 
 void SetMoveFront(){
-  PrintScreen("Move Front");
   SetMoveLeftMotor(1);
   SetMoveRightMotor(1);
 }
 void SetMoveBack(){
-  PrintScreen("Move Back");
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(-1);
 }
@@ -238,17 +238,21 @@ bool ReadIrSensor(){
 
 boolean ReadFenceSensors(){
   int left = analogRead(FencereaderPinLeft);
-  if(left < 75)
+  if(left < 100)
   {
     RecommendedDirection = DirectionRight;
-    // PrintScreen("FenceLeft "+left);
+    SetStopWheels();  // TODO: remove
+    BlinkLedPin(BlueLedPin, 5); // TODO: remove
+    SetMoveFront(); // TODo: remove
     return true;
   }
   int right = analogRead(FencereaderPinRight);
-  if (right < 75)
+  if (right < 100)
   {
     RecommendedDirection = DirectionLeft;
-    // PrintScreen("FenceRight " +right);
+    SetStopWheels();  // TODO: remove
+    BlinkLedPin(BlueLedPin, 5); // TODO: remove
+    SetMoveFront(); // TODo: remove
     return true;
   }
   return false;
@@ -260,13 +264,6 @@ void setup()
 {  
   Serial.begin(115200);
   SetUpMotorPins();
-  // Delays the start to give time to the user to walk back.
-  //u8x8.begin();
-  //u8x8.clear();
-  //u8x8.setFont(u8x8_font_victoriabold8_r);
-  //u8x8.setCursor(0,0);
-  PrintScreen("New Core v4!");
-  //u8x8.println(F("Starting..."));
   CurrentSubMode = SUB_MODE_NAVIGATING;
   CurrentMode = MODE_MOWING;
   // bumper setup
@@ -276,7 +273,14 @@ void setup()
   //pinMode(IrSensorPin, INPUT);
   pinMode(IrSensorPinLeft, INPUT);
   pinMode(IrSensorPinRight, INPUT);
+  pinMode(RedLedPin, OUTPUT);
+  pinMode(BlueLedPin, OUTPUT);
   Navigate();
+  BlinkLedPin(BlueLedPin, 5);
+  BlinkLedPin(RedLedPin, 5);
+  digitalWrite(BlueLedPin, HIGH);
+  digitalWrite(RedLedPin, HIGH);
+
 }
 
 bool ReadBumperSensors(){
@@ -354,41 +358,6 @@ void GetBatteryVoltage(){
   CurrentBatteryPercentage = GetBatteryPercentage();
 }
 
-void UpdateScreenStats()
-{
-  String bat = "";
-  bat =  bat + "Bat:"+CurrentBatteryPercentage;
-  bat =  bat+"%@"+ CurrentVoltage + "v";
-  //bat = bat+"V";
-  String oldDebug = CurrentBatteryPercentage + CurrentDebug1 + CurrentDebug2 + CurrentDebug3;
-  if(CurrentScreen == oldDebug)
-  {
-    return;
-  }
-  //battery: (%/volts)
-  //u8x8.clear();
-  //u8x8.setCursor(0,0);
-  //u8x8.println(bat);
-  //u8x8.println(DistancesDebug);
-  //u8x8.println(CurrentDebug1);
-  //u8x8.println(CurrentDebug2);
-  //u8x8.println(CurrentDebug3);
-  //u8x8.println(CurrentDebug4);
-  //u8x8.println(CurrentDebug5);
-  CurrentScreen = oldDebug;
-}
-
-void PrintScreen(String message){
-  if(message == CurrentDebug1){
-    // save screen
-    return;
-  }
-  CurrentDebug5 = CurrentDebug4;
-  CurrentDebug4 = CurrentDebug3;
-  CurrentDebug3 = CurrentDebug2;
-  CurrentDebug2 = CurrentDebug1;
-  CurrentDebug1 = message;
-}
 
 void NavigateAndAvoidObstacles(String objective){
     if (CurrentSubMode == SUB_MODE_REDIRECTING)
@@ -397,7 +366,6 @@ void NavigateAndAvoidObstacles(String objective){
       Redirect();
     }else if( CurrentSubMode == SUB_MODE_NAVIGATING)
     {
-      // PrintScreen(objective);
       Navigate();
     }
 }
@@ -406,19 +374,14 @@ void Navigate(){
     // Check sensors
     if(GetSensorState())
     {
-      // something happens? relocate
       CurrentSubMode = SUB_MODE_REDIRECTING;
-      // PrintScreen("REDIRECTING");
-    }else{
-      // PrintScreen("NAVIGATING");
     }
-    // nothing happens continue navigating
 }
 
 void Redirect()
 {
+    // Collision or redirection
     // Move back enough to not hit anything
-    PrintScreen("Collision");
     // turn arround
     SetMoveBack();
     delay(random(500, 3000)); // time depends of the RPM of the motors
@@ -433,31 +396,33 @@ void Redirect()
     CutGrass();
     // continue for next cicle
     CurrentSubMode = SUB_MODE_NAVIGATING;
-    // PrintScreen("NAVIGATING");
 }
 
 void SetModeByBatteryPercentage(){
-  if(CurrentBatteryPercentage>=60)
+  if(CurrentBatteryPercentage>=95)
   {
     // ask if can mow
-    if(CurrentMode == MODE_CHARGING || CurrentMode == MODE_RETURNING_HOME){
+    if(CurrentMode == MODE_CHARGING || CurrentMode == MODE_RETURNING_HOME) {
       CurrentMode = MODE_MOWING;
       CurrentSubMode = SUB_MODE_NAVIGATING;
       SetMoveFront();
-      PrintScreen("Battery Ready.");
+      digitalWrite(BlueLedPin, HIGH);
+      digitalWrite(RedLedPin, LOW);
     }
   }
-  else if(CurrentBatteryPercentage<10){ // Stop moving if battery is lower than x%
+  else if(CurrentBatteryPercentage<10) { // Stop moving if battery is lower than x%
     CurrentMode = MODE_CHARGING;
-    PrintScreen("Low Battery.");
     SetStopWheels();
-    PrintScreen("RECHARGING");
+    digitalWrite(BlueLedPin, LOW);
+    digitalWrite(RedLedPin, HIGH);
   }
   else if(CurrentBatteryPercentage<40) // TODO: revert to 40
   {
     // look for charging
     if(CurrentMode == MODE_MOWING)
     {
+      //digitalWrite(BlueLedPin, LOW);
+      BlinkLedPin(BlueLedPin, 2);
       CurrentMode = MODE_RETURNING_HOME;
       CurrentSubMode = SUB_MODE_NAVIGATING;
       Serial.println("RETURNING HOME");
@@ -470,6 +435,19 @@ void StopCuttingGrass(){
 }
 void CutGrass(){
   digitalWrite(GrassCutterPin, HIGH);
+}
+
+void BlinkLedPin(int LedPinNumber, int Times){
+  int originalState = digitalRead(LedPinNumber);
+  while(Times>0) {
+    digitalWrite(LedPinNumber, HIGH);
+    delay(200);
+    digitalWrite(LedPinNumber, LOW);
+    delay(200);
+    Times--;
+  }
+  // return to original state
+  digitalWrite(LedPinNumber, originalState);
 }
 
 void loop()
@@ -508,27 +486,32 @@ void loop()
           CurrentMode = MODE_CHARGING;
           SetStopWheels();
           RecommendedDirectionIr = DirectionNone;
-          Serial.println("parcked for charging!");
+          Serial.println("Parcked for charging!");
+          BlinkLedPin(BlueLedPin, 5);
         }
       }
     }
   }
   else if(CurrentMode ==  MODE_RESTING)
   {
-    PrintScreen("RESTING");
     SetStopWheels();
   }
   else if(CurrentMode ==  MODE_CHARGING)
   {
     SetStopWheels();
-    PrintScreen("RECHARGING");
+    BlinkLedPin(RedLedPin, 3);
+    BlinkLedPin(BlueLedPin, CurrentBatteryPercentage/10);
   }
   else{
-    PrintScreen("Err:"+CurrentMode);
     SetStopWheels();
+    /// Unknown error/state flash all leds:
+    digitalWrite(RedLedPin, HIGH);
+    digitalWrite(BlueLedPin, HIGH);
+    delay(2000);
+    digitalWrite(RedLedPin, LOW);
+    digitalWrite(BlueLedPin, LOW);
   }
   GetBatteryVoltage();
   SetModeByBatteryPercentage();
   GetSensorState();
-  UpdateScreenStats();
 }
