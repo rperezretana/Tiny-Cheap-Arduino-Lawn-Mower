@@ -3,24 +3,54 @@
 #include <IRremote.h>
 #include <IRremoteInt.h>
 
+
+// fence readers
+int FencereaderPinLeft = A6;
+int FencereaderPinRight = A7;
+
+// Light Indicators
+int GreenLedPin = 7;
+int RedLedPin = 6;
+
 IRsend irsend = IRsend();
 
 void setup()
 {  
   Serial.begin(115200);
   // pinMode(IrTransmiterPin, OUTPUT);
-
+  pinMode(RedLedPin, OUTPUT);
+  pinMode(GreenLedPin, OUTPUT);
+ digitalWrite(RedLedPin, LOW);
+ digitalWrite(GreenLedPin, LOW);
 }
 
 int counter = 20;
 
-void loop(){
-  while(counter > 0)
+boolean ReadFenceSensors(){
+  int left = analogRead(FencereaderPinLeft);
+  if(left < 100)
   {
-    delayMicroseconds(500);
-    // IR sender, just send a code
-    irsend.sendSony(counter, 2, 2);
-    counter--;
+    return true;
   }
-  counter =  20;
+  int right = analogRead(FencereaderPinRight);
+  if (right < 100)
+  {
+    return true;
+  }
+  return false;
+}
+
+
+void loop(){
+    if(ReadFenceSensors() && ReadFenceSensors() && ReadFenceSensors())
+    {
+        digitalWrite(GreenLedPin, HIGH);
+        irsend.sendSony(1, 2, 2); // 410 == 1 and 400 == 0
+        digitalWrite(RedLedPin, LOW);
+    }
+    else {
+        digitalWrite(GreenLedPin, LOW);
+        digitalWrite(RedLedPin, HIGH);
+        irsend.sendSony(0, 2, 2); // 410 == 1 and 400 == 0
+    }
 }
