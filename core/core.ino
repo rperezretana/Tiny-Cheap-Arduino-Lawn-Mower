@@ -27,7 +27,7 @@ D9: BlueLedPin
 D10: RedLedPin
 D11: UltrasonicSensorLeft
 D12: UltrasonicSensorCenter
-D13: FREE
+D13: IrSensorPinBack
 
 */
 
