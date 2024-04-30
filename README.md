@@ -1,2 +1,2 @@
-# LawnMoers
+# LawnMowers
  Arduino simple lawnmowers
