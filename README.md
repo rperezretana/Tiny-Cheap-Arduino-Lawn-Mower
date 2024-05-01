@@ -1,2 +1,2 @@
-# LawnMowers
- Arduino simple lawnmowers
+# LawnMower
+ Arduino simple lawnmower
