@@ -27,14 +27,14 @@ D9: BlueLedPin
 D10: RedLedPin
 D11: UltrasonicSensorLeft
 D12: UltrasonicSensorCenter
-D13: IrSensorPinBack
+D13: FREE
 
 */
 
 
 // Light Indicators
-int BlueLedPin = 9;
-int RedLedPin = 10;
+int BlueLedPin = 10;
+int RedLedPin = 9;
 
 
 // fence readers
@@ -76,13 +76,6 @@ int MotorSpeeds = 255;
 
 
 // Mode:
-String CurrentDebug1 = "Starting...";
-String CurrentDebug2 = "";
-String CurrentDebug3 = "";
-String CurrentDebug4 = "";
-String CurrentDebug5 = "";
-String CurrentScreen = "1";
-
 int MODE_CHARGING = -2;
 int MODE_RESTING = -1;
 int MODE_MOWING = 0;
@@ -98,7 +91,8 @@ int CurrentSubMode = 0;
 int VoltageReaderPin = A0;
 float CurrentVoltage = 12.6;
 float MarginVoltage = 0.05;
-int CurrentBatteryPercentage = 0;
+int CurrentBatteryPercentage = 100;
+int CicleCounter = 0;
 
 /*
   MOTORS
@@ -117,6 +111,7 @@ void SetStopWheels(){
     analogWrite(MotorPinLeft2, LOW);
     analogWrite(MotorPinRight1, LOW);
     analogWrite(MotorPinRight2, LOW);
+    BlinkLedPin(BlueLedPin, CurrentBatteryPercentage/10);
     delay(3000);
 }
 
@@ -161,7 +156,7 @@ void SetMoveBack(){
 */
 
 int ReadSingleUltrasonicSensor(int sensor){
-  delayMicroseconds(100);
+  delay(20);
   pinMode(sensor, OUTPUT);
   digitalWrite(sensor, LOW);
   digitalWrite(sensor, HIGH);
@@ -173,13 +168,14 @@ int ReadSingleUltrasonicSensor(int sensor){
 
 boolean ReadUltrasonicSensor(){
   DistancesDebug = "Dis:";
-  int distanceLeft = ReadSingleUltrasonicSensor(UltrasonicSensorLeft);
-  int distanceCenter = ReadSingleUltrasonicSensor(UltrasonicSensorCenter);
-  int distanceRight = ReadSingleUltrasonicSensor(UltrasonicSensorRight);
+  int distanceLeft = max(ReadSingleUltrasonicSensor(UltrasonicSensorLeft), ReadSingleUltrasonicSensor(UltrasonicSensorLeft));
+  int distanceCenter = max(ReadSingleUltrasonicSensor(UltrasonicSensorCenter), ReadSingleUltrasonicSensor(UltrasonicSensorCenter));
+  int distanceRight = max(ReadSingleUltrasonicSensor(UltrasonicSensorRight), ReadSingleUltrasonicSensor(UltrasonicSensorRight));
   // Prints the distance on the Serial Monitor
   DistancesDebug = DistancesDebug + distanceLeft+"/";
   DistancesDebug = DistancesDebug + distanceCenter +"/";
   DistancesDebug = DistancesDebug + distanceRight;
+  Serial.println(DistancesDebug + " - bat: "+CurrentBatteryPercentage + ". V: "+CurrentVoltage + " - "+ CurrentMode + " Cicle: "+ CicleCounter);
 
   int distanceAllowed = 30;
   if(CurrentMode == MODE_RETURNING_HOME)
@@ -212,11 +208,11 @@ bool ReadIrSensor(){
   while(readings)
   {
     readings--;
-    if(analogIrLeft < 1000) {
+    if(analogIrLeft < 600) {
       detected = true;
       detectedLeft++;
     }
-    if(analogIrRight < 1000) {
+    if(analogIrRight < 600) {
       Serial.println(analogIrRight);
       detectedRight++;
       detected = true;
@@ -228,7 +224,7 @@ bool ReadIrSensor(){
   if(detectedLeft>0 && detectedRight>0) {
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirection = DirectionCenter;
-  } else if (detectedRight){
+  } else if (detectedRight > detectedLeft){
     RecommendedDirectionIr = DirectionRight;
   } else if (detectedLeft){
     RecommendedDirectionIr = DirectionLeft;
@@ -353,9 +349,21 @@ void GetBatteryVoltage(){
   // v = X
   float R1 = 47000.0;
   float R2 = 10000.0;
-  float voltage = analogRead(VoltageReaderPin) * (5.0/1024)*((R1 + R2)/R2);
-  CurrentVoltage = ((CurrentVoltage + voltage)/2) + MarginVoltage;
-  CurrentBatteryPercentage = GetBatteryPercentage();
+  if(CicleCounter%150==0)
+  {
+    if(CurrentSubMode == SUB_MODE_NAVIGATING)
+    {
+      SetStopWheels();
+    }
+    float voltage = analogRead(VoltageReaderPin) * (5.0/1024)*((R1 + R2)/R2);
+    CurrentVoltage = ((CurrentVoltage + voltage)/2) + MarginVoltage;
+    CurrentBatteryPercentage = GetBatteryPercentage();
+    if(CurrentSubMode == SUB_MODE_NAVIGATING)
+    {
+      SetMoveFront();
+      CutGrass();
+    }
+  }
 }
 
 
@@ -383,6 +391,7 @@ void Redirect()
     // Collision or redirection
     // Move back enough to not hit anything
     // turn arround
+    CicleCounter=0;
     SetMoveBack();
     delay(random(500, 3000)); // time depends of the RPM of the motors
     if(RecommendedDirection == DirectionLeft)
@@ -398,34 +407,58 @@ void Redirect()
     CurrentSubMode = SUB_MODE_NAVIGATING;
 }
 
+bool MakeSureVoltageIsLessThan(int minimum){
+    // SetStopWheels();
+    Serial.println("DC voltage "+ minimum);
+    int timesToCheck = 20;
+    while (timesToCheck > 0)
+    {
+      /* code */
+      delay(10);
+      GetBatteryVoltage();
+      CurrentBatteryPercentage = GetBatteryPercentage();
+      timesToCheck--;
+      if(CurrentBatteryPercentage > minimum)
+      {
+        return false;
+      }
+    }
+    return true;
+}
+
 void SetModeByBatteryPercentage(){
-  if(CurrentBatteryPercentage>=95)
+  if(CurrentBatteryPercentage>=80)
   {
     // ask if can mow
-    if(CurrentMode == MODE_CHARGING || CurrentMode == MODE_RETURNING_HOME) {
-      CurrentMode = MODE_MOWING;
-      CurrentSubMode = SUB_MODE_NAVIGATING;
-      SetMoveFront();
-      digitalWrite(BlueLedPin, HIGH);
-      digitalWrite(RedLedPin, LOW);
+    if(CurrentMode == MODE_CHARGING || CurrentMode == MODE_RETURNING_HOME || CurrentMode == MODE_RESTING) {
+      if(!MakeSureVoltageIsLessThan(80)){
+        CurrentMode = MODE_MOWING;
+        CurrentSubMode = SUB_MODE_NAVIGATING;
+        SetMoveFront();
+      }
     }
+    digitalWrite(BlueLedPin, HIGH);
+    digitalWrite(RedLedPin, LOW);
   }
   else if(CurrentBatteryPercentage<10) { // Stop moving if battery is lower than x%
-    CurrentMode = MODE_CHARGING;
-    SetStopWheels();
-    digitalWrite(BlueLedPin, LOW);
-    digitalWrite(RedLedPin, HIGH);
+    if(MakeSureVoltageIsLessThan(10)){
+      CurrentMode = MODE_RESTING;
+      Serial.println("Battery less than 10%");
+      SetStopWheels();
+      BlinkLedPin(RedLedPin, CurrentBatteryPercentage/10);
+    }
   }
-  else if(CurrentBatteryPercentage<40) // TODO: revert to 40
+  else if(CurrentBatteryPercentage<35)
   {
     // look for charging
-    if(CurrentMode == MODE_MOWING)
+    if(CurrentMode == MODE_MOWING && MakeSureVoltageIsLessThan(35))
     {
-      //digitalWrite(BlueLedPin, LOW);
-      BlinkLedPin(BlueLedPin, 2);
       CurrentMode = MODE_RETURNING_HOME;
       CurrentSubMode = SUB_MODE_NAVIGATING;
       Serial.println("RETURNING HOME");
+      Serial.println(CurrentBatteryPercentage);
+      digitalWrite(BlueLedPin, LOW);
+      digitalWrite(RedLedPin, HIGH);
     }
   }
 }
@@ -441,9 +474,9 @@ void BlinkLedPin(int LedPinNumber, int Times){
   int originalState = digitalRead(LedPinNumber);
   while(Times>0) {
     digitalWrite(LedPinNumber, HIGH);
-    delay(200);
+    delay(500);
     digitalWrite(LedPinNumber, LOW);
-    delay(200);
+    delay(500);
     Times--;
   }
   // return to original state
@@ -452,6 +485,7 @@ void BlinkLedPin(int LedPinNumber, int Times){
 
 void loop()
 {
+
   if(CurrentMode == MODE_MOWING) {
      NavigateAndAvoidObstacles("MOWING");
   }
@@ -495,12 +529,17 @@ void loop()
   else if(CurrentMode ==  MODE_RESTING)
   {
     SetStopWheels();
+    digitalWrite(BlueLedPin, LOW);
+    digitalWrite(RedLedPin, LOW);
+    BlinkLedPin(RedLedPin, 3);
+    Serial.println("Resting Mode, battery at:");
+    Serial.println(CurrentBatteryPercentage);
   }
   else if(CurrentMode ==  MODE_CHARGING)
   {
     SetStopWheels();
     BlinkLedPin(RedLedPin, 3);
-    BlinkLedPin(BlueLedPin, CurrentBatteryPercentage/10);
+    Serial.println("Low Battery - Charging");
   }
   else{
     SetStopWheels();
@@ -514,4 +553,5 @@ void loop()
   GetBatteryVoltage();
   SetModeByBatteryPercentage();
   GetSensorState();
+  CicleCounter++;
 }
