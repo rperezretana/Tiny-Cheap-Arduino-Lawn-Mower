@@ -13,7 +13,7 @@ A6: FencereaderPinLeft
 A7: FencereaderPinRight
 D2: MotorPinRight2
 D3: MotorPinRight1
-D4: FREE
+D4: IrSensorPinBack
 D5: MotorPinLeft2
 D6: MotorPinLeft1
 D7: UltrasonicSensorRight
@@ -22,7 +22,7 @@ D9: BlueLedPin
 D10: RedLedPin
 D11: UltrasonicSensorLeft
 D12: UltrasonicSensorCenter
-D13: IrSensorPinBack
+D13: FREE
 
 */
 
@@ -37,7 +37,7 @@ int FencereaderPinLeft = A6;
 int FencereaderPinRight = A7;
 
 // IR sensor
-int IrSensorPinBack =  13;
+int IrSensorPinBack = 4;
 int IrSensorPinRight = A4;
 IRrecv irrecv_right(IrSensorPinRight);
 int IrSensorPinLeft = A5;
@@ -63,6 +63,7 @@ int DirectionNone = 1;
 int DirectionRight = 1;
 int DirectionLeft = 2;
 int DirectionCenter = 3;
+int DirectionBack = 4;
 int RecommendedDirection = 0;
 int MotorSpeeds = 255;
 
@@ -210,7 +211,7 @@ bool ReadIrSensor(){
   int analogIrLeft = analogRead(IrSensorPinLeft);
   int analogIrRight = analogRead(IrSensorPinRight);
   int analogIrback = analogRead(IrSensorPinBack);
-  int readings = 150;
+  int readings = 250;
   bool detected = false;
   RecommendedDirectionIr = DirectionNone;
   int detectedLeft = 0;
@@ -229,7 +230,7 @@ bool ReadIrSensor(){
       detectedRight++;
       detected = true;
     }
-    if(analogIrback < 600)
+    if(analogIrback < 1000)
     {
       detectedBack++;
       detected = true;
@@ -240,16 +241,14 @@ bool ReadIrSensor(){
   }
   if(detectedLeft>0 && detectedRight>0) {
     // both sensors detect the base signal, so recommends to move fordwardish.
-    Serial.println("Both more than 0");
     RecommendedDirectionIr = DirectionCenter;
   } else if (detectedRight > 0){
-    Serial.println("Right >0!");
     RecommendedDirectionIr = DirectionRight;
   } else if (detectedLeft > 0){
-    Serial.println("Left >0!");
     RecommendedDirectionIr = DirectionLeft;
   } else if(detectedBack > 0){
     Serial.println("Detected in the back!");
+    RecommendedDirectionIr = DirectionBack;
   } else {
     Serial.println("Not Home detected!");
   }
@@ -557,6 +556,15 @@ void loop()
           Serial.println("Parcked for charging!");
           BlinkLedPin(BlueLedPin, 5);
         }
+      }
+      else if(RecommendedDirectionIr == DirectionBack){
+        SetMoveBack();
+        delay(random(1500, 4500));
+        SetMoveRight();
+        delay(random(4500, 7500));
+        Serial.println("Trying to turn back");
+        SetMoveFront();
+        RecommendedDirectionIr = DirectionNone;
       } else {
         Serial.println("ERROR: not recommended direction!!!!");
       }
@@ -589,5 +597,13 @@ void loop()
   }
   GetBatteryVoltage();
   SetModeByBatteryPercentage();
+  // make sure the IR is visible:
+  if(!ReadIrSensor())
+  {
+    // IR still visible
+    Serial.println("IR base not detected.");
+  } else{
+    Serial.println("Base in RANGE!!!");
+  }
   CicleCounter++;
 }
