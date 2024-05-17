@@ -37,6 +37,9 @@ int FencereaderPinLeft = A6;
 int FencereaderPinRight = A7;
 
 // IR sensor
+int SensorRunCicle = 0;
+int LastSensorDetectedOn = 0;
+int LimitIrDetected = 50;
 int IrSensorPinBack = 4;
 int IrSensorPinRight = A4;
 IRrecv irrecv_right(IrSensorPinRight);
@@ -211,7 +214,7 @@ bool ReadIrSensor(){
   int analogIrLeft = analogRead(IrSensorPinLeft);
   int analogIrRight = analogRead(IrSensorPinRight);
   int analogIrback = analogRead(IrSensorPinBack);
-  int readings = 250;
+  int readings = 100;
   bool detected = false;
   RecommendedDirectionIr = DirectionNone;
   int detectedLeft = 0;
@@ -584,6 +587,7 @@ void loop()
     SetStopWheels();
     BlinkLedPin(RedLedPin, 3);
     Serial.println("Low Battery - Charging");
+    SensorRunCicle = 0;
   }
   else{
     Serial.println("Unknown error/state flash all leds");
@@ -598,12 +602,23 @@ void loop()
   GetBatteryVoltage();
   SetModeByBatteryPercentage();
   // make sure the IR is visible:
-  if(!ReadIrSensor())
+  if(ReadIrSensor())
+  {
+    LastSensorDetectedOn = SensorRunCicle;
+    Serial.println("Base in RANGE!!!");
+  }
+  else
   {
     // IR still visible
     Serial.println("IR base not detected.");
-  } else{
-    Serial.println("Base in RANGE!!!");
+    Serial.println(SensorRunCicle);
+    if(SensorRunCicle > LimitIrDetected + LastSensorDetectedOn)
+    {
+      SetStopWheels();
+    } else {
+      Serial.println("Base not in range???");
+    }
   }
+  SensorRunCicle++;
   CicleCounter++;
 }
