@@ -58,7 +58,7 @@ volatile byte StateBumperRight = HIGH;
 // ultrasonic sensors
 String DistancesDebug = "---------------";
 int UltrasonicSensorCollisions = 0;
-int UltrasonicSensorCollisionAllowed = 10;
+int UltrasonicSensorCollisionAllowed = 3;
 int UltrasonicSensorLeft =11;
 int UltrasonicSensorCenter = 12;
 int UltrasonicSensorRight = 7;
@@ -197,10 +197,10 @@ boolean ReadUltrasonicSensor(){
   DistancesDebug = DistancesDebug + distanceRight;
   Serial.println(DistancesDebug + " - bat: "+CurrentBatteryPercentage + ". V: "+CurrentVoltage + " - "+ CurrentMode + " Cicle: "+ CicleCounter);
 
-  int distanceAllowed = 35;
+  int distanceAllowed = 20;
   if(CurrentMode == MODE_RETURNING_HOME)
   {
-    distanceAllowed =  20;
+    distanceAllowed =  5;
   }
   boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < distanceAllowed;
   if(collisionDetected)
@@ -275,7 +275,7 @@ boolean ReadFenceSensors(){
   {
     RecommendedDirection = DirectionRight;
     SetStopWheels();  // TODO: remove
-    BlinkLedPin(RedLedPin, 5); // TODO: remove
+    BlinkLedPin(BlueLedPin, 5); // TODO: remove
     SetMoveFront(); // TODo: remove
     return true;
   }
@@ -284,7 +284,7 @@ boolean ReadFenceSensors(){
   {
     RecommendedDirection = DirectionLeft;
     SetStopWheels();  // TODO: remove
-    BlinkLedPin(RedLedPin, 5); // TODO: remove
+    BlinkLedPin(BlueLedPin, 5); // TODO: remove
     SetMoveFront(); // TODo: remove
     return true;
   }
@@ -332,13 +332,16 @@ bool GetSensorState(){
     This is a basic alert from the sensors, if true, sensors are asking to turn arround.
     If false, sensors do not find anything.
   */
-  if(ReadUltrasonicSensor() && UltrasonicSensorCollisionAllowed > UltrasonicSensorCollisions)
+  if(ReadUltrasonicSensor())
   {
-    // Allow some collision, some insect flying by, or some small tall gras or dandelions grew fast
-    UltrasonicSensorCollisions++;
-  } else if(UltrasonicSensorCollisionAllowed <= UltrasonicSensorCollisions){
-    UltrasonicSensorCollisions = 0;
-    return true;
+    if(UltrasonicSensorCollisionAllowed > UltrasonicSensorCollisions)
+    {
+      // Allow some collision, some insect flying by, or some small tall gras or dandelions grew fast
+      UltrasonicSensorCollisions++;
+    } else {
+      UltrasonicSensorCollisions = 0;
+      return true;
+    }
   }
   return ReadBumperSensors() || ReadFenceSensors();
 }
@@ -544,7 +547,7 @@ void MoveToIrRecommendedDirection(){
       {
         SetMoveLeft();
         CutGrass();
-        delay(random(1500, 5000));
+        delay(random(5500, 15000));
         Serial.println("Move a bit to the left.");
         SetMoveFront();
         RecommendedDirectionIr = DirectionNone;
@@ -553,7 +556,7 @@ void MoveToIrRecommendedDirection(){
       {
         SetMoveRight();
         CutGrass();
-        delay(random(1500, 5000));
+        delay(random(5500, 15000));
         Serial.println("Move a bit to the right.");
         SetMoveFront();
         RecommendedDirectionIr = DirectionNone;
@@ -573,9 +576,9 @@ void MoveToIrRecommendedDirection(){
       }
       else if(RecommendedDirectionIr == DirectionBack){
         SetMoveBack();
-        delay(random(1500, 3500));
+        delay(random(5000, 15000));
         SetMoveRight();
-        delay(random(4500, 7500));
+        delay(random(10000, 20000));
         Serial.println("Trying to turn back");
         SetMoveFront();
         RecommendedDirectionIr = DirectionNone;
@@ -595,6 +598,26 @@ void BlinkLedPin(int LedPinNumber, int Times){
   }
   // return to original state
   digitalWrite(LedPinNumber, originalState);
+}
+
+void DontLoseIrBaseOfSight(){
+    // to make sure
+    if(CurrentSubMode == SUB_MODE_NAVIGATING && ReadIrSensor())
+    {
+      // already in sight
+      if(RecommendedDirectionIr != DirectionCenter)
+      {
+        MoveToIrRecommendedDirection();
+        ReadIrSensor();
+        int limit = 4;
+        while(RecommendedDirectionIr == DirectionBack && limit > 0)
+        {
+          MoveToIrRecommendedDirection();
+          ReadIrSensor();
+          limit--;
+        }
+      }
+    }
 }
 
 void loop()
@@ -638,15 +661,14 @@ void loop()
     digitalWrite(RedLedPin, LOW);
     digitalWrite(BlueLedPin, LOW);
   }
-  if(CicleCounter > 0  && CicleCounter%75 == 0)
+  if(CicleCounter > 0  && CicleCounter%100 == 0)
   {
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
-    // to make sure
-    if(CurrentSubMode == SUB_MODE_NAVIGATING && ReadIrSensor())
-    {
-      MoveToIrRecommendedDirection();
-    }
+  }
+  if(CicleCounter%50 == 0)
+  {
+    DontLoseIrBaseOfSight();
   }
   // make sure the IR is visible:
   if(ReadIrSensor())
