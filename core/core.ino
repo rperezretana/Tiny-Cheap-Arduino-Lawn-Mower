@@ -231,11 +231,11 @@ bool ReadIrSensor(){
   while(readings)
   {
     readings--;
-    if(analogIrLeft < 600) {
+    if(analogIrLeft < 900) {
       detected = true;
       detectedLeft++;
     }
-    if(analogIrRight < 600) {
+    if(analogIrRight < 900) {
       detectedRight++;
       detected = true;
     }
@@ -271,7 +271,7 @@ bool ReadIrSensor(){
 
 boolean ReadFenceSensors(){
   int left = analogRead(FencereaderPinLeft);
-  if(left < 100)
+  if(left < 400)
   {
     RecommendedDirection = DirectionRight;
     SetStopWheels();  // TODO: remove
@@ -280,7 +280,7 @@ boolean ReadFenceSensors(){
     return true;
   }
   int right = analogRead(FencereaderPinRight);
-  if (right < 100)
+  if (right < 400)
   {
     RecommendedDirection = DirectionLeft;
     SetStopWheels();  // TODO: remove
