@@ -38,6 +38,7 @@ int FencereaderPinRight = A6;
 
 // IR sensor
 int SensorRunCicle = 0;
+bool BatteryProtectionTriggeredStop = false;
 bool StoppedBecauseIROutOfRange = false;
 int LimitIrDetected = 10;
 int IrSensorPinBack = 4;
@@ -62,7 +63,7 @@ int UltrasonicSensorRight = 7;
 
 // motors
 int GrassCutterPin = A2;
-int DirectionNone = 1;
+int DirectionNone = -1;
 int DirectionRight = 1;
 int DirectionLeft = 2;
 int DirectionCenter = 3;
@@ -110,7 +111,9 @@ void SetUpMotorPins(){
 }
 
 bool WheelsGoing = false;
-void SetStopWheels(){
+void SetStopWheels()//String debug)
+{
+    //Serial.println("SetStopWheels: "+debug);
     WheelsGoing = false;
     StopCuttingGrass();
     analogWrite(MotorPinLeft1, LOW);
@@ -250,12 +253,15 @@ bool ReadIrSensor(){
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
+    Serial.println("Detected IR Center");
   } else if (detectedRight > 0){
     RecommendedDirectionIr = DirectionRight;
     RecommendedDirection = DirectionRight;
+    Serial.println("Detected IR Right");
   } else if (detectedLeft > 0){
     RecommendedDirectionIr = DirectionLeft;
     RecommendedDirection = DirectionLeft;
+    Serial.println("Detected IR Left");
   } else if(detectedBack > 0){
     Serial.println("Detected in the back!");
     RecommendedDirectionIr = DirectionBack;
@@ -263,9 +269,9 @@ bool ReadIrSensor(){
   } else {
     Serial.println("Not Home detected!935664");
   }
-  String debug1 = "Evaluated with [";
-  debug1 = debug1 + detectedRight + " - ";
-  debug1 =  debug1 + detectedLeft + " - ";
+  String debug1 = "Evaluated with [ R: ";
+  debug1 = debug1 + detectedRight + " L: - ";
+  debug1 =  debug1 + detectedLeft + " B: - ";
   debug1 =  debug1 + detectedBack + "]";
   Serial.println(debug1);
   return detected;
@@ -281,9 +287,6 @@ boolean ReadFenceSensors(){
     {
       RecommendedDirection = DirectionRight;
       Serial.println("Fence detected Left ");
-      SetStopWheels();  // TODO: remove
-      BlinkLedPin(BlueLedPin, 5); // TODO: remove
-      SetMoveFront(); // TODo: remove
       return true;
     }
     left = analogRead(FencereaderPinLeft);
@@ -297,9 +300,6 @@ boolean ReadFenceSensors(){
     {
       RecommendedDirection = DirectionLeft;
       Serial.println("Fence detected Right ");
-      SetStopWheels();  // TODO: remove
-      BlinkLedPin(BlueLedPin, 5); // TODO: remove
-      SetMoveFront(); // TODo: remove
       return true;
     }
     right = analogRead(FencereaderPinRight);
@@ -432,21 +432,24 @@ void NavigateAndAvoidObstacles(String objective){
         if (RecommendedDirectionIr == DirectionCenter){
           // base is on target now, continue and call is done
           CurrentSubMode = SUB_MODE_NAVIGATING;
+          Serial.println("Transision to SUB_MODE_NAVIGATING");
           SetMoveFront();
-          return;
         } else if(RecommendedDirectionIr != DirectionNone) {
-          MoveToIrRecommendedDirection();
+          MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
+          SetMoveFront(); // move front just a bit for better view.
+        } else {
+          Serial.println("Recommended direction not found: ");
+          Serial.println(RecommendedDirectionIr);
         }
-        SetMoveFront(); // move front just a bit for better view.
-        delay(1000);
-        SetStopWheels();
         if(GetSensorState())
         {
           // we redirect here so we can continue on SUB_MODE_REDIRECTING_TOWARDS_BASE
           Redirect();
         }
+        CutGrass();
       } else {
         SetStopWheels(); // lost signal of the base, this prevents the scape and prevent to keep collision.
+        Serial.println("Lost signal, waiting for one.");
       }
     }
     else if(CurrentSubMode == SUB_MODE_NAVIGATING)
@@ -463,6 +466,7 @@ void NavigateAndAvoidObstacles(String objective){
           // only move back if has been traveling some time ( # cycles )
           SetMoveBack();
           delay(10000);
+          Serial.println("Signal Lost, long back track.");
         }
         SetStopWheels();
       }
@@ -588,13 +592,14 @@ void SetModeByBatteryPercentage() {
 }
 
 void StopCuttingGrass(){  
-  analogWrite(GrassCutterPin, 0);
+  digitalWrite(GrassCutterPin, LOW);
 }
 void CutGrass(){
-  analogWrite(GrassCutterPin, 150);
+  digitalWrite(GrassCutterPin, HIGH);
 }
 
-bool MoveToIrRecommendedDirection(){
+bool MoveToIrRecommendedDirection(String debug){
+      Serial.println("MoveToIrRecommendedDirection:" + debug);
       // it detects the base:
       if(RecommendedDirectionIr == DirectionLeft)
       {
@@ -663,14 +668,14 @@ void DontLoseIrBaseOfSight(){
         // already in sight
         if(RecommendedDirectionIr != DirectionCenter)
         {
-          if(MoveToIrRecommendedDirection()){
+          if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 1")){
             SetMoveFront();
           }
           ReadIrSensor();
           int limit = 10000;
           while(RecommendedDirectionIr == DirectionBack && limit > 0)
           {
-            if(MoveToIrRecommendedDirection()){
+            if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2")){
               SetMoveFront();
             }
             ReadIrSensor();
@@ -693,7 +698,7 @@ void loop()
     if(ReadIrSensor())
     {
       Serial.println("HOME DETECTED");
-      MoveToIrRecommendedDirection();
+      MoveToIrRecommendedDirection("HOME DETECTED");
     }
   }
   else if(CurrentMode == MODE_RESTING)
@@ -735,8 +740,12 @@ void loop()
   CicleCounter++;
   if(GetBatteryVoltage() < 10)
   { 
+    BatteryProtectionTriggeredStop = WheelsGoing;
     SetStopWheels();
     BlinkLedPin(RedLedPin, 2);
     Serial.println("Battery protection triggered");
+  } else if (BatteryProtectionTriggeredStop) {
+    BatteryProtectionTriggeredStop = false;
+    SetMoveFront();
   }
 }
