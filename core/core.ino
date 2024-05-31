@@ -174,7 +174,7 @@ int ReadSingleUltrasonicSensor(int sensor){
 
 int MulticheckUltrasonicDistance(int sensor)
 {
-  int verifications = 5;
+  int verifications = 25;
   int distance =  1;
   while(verifications>0)
   {
@@ -195,7 +195,7 @@ boolean ReadUltrasonicSensor(){
   DistancesDebug = DistancesDebug + distanceRight;
   Serial.println(DistancesDebug + " - bat: "+CurrentBatteryPercentage + ". V: "+CurrentVoltage + " - "+ CurrentMode + " Cicle: "+ CicleCounter);
 
-  int distanceAllowed = 25;
+  int distanceAllowed = 30;
   if(CurrentMode == MODE_RETURNING_HOME)
   {
     distanceAllowed =  9;
@@ -218,7 +218,7 @@ bool ReadIrSensor(){
   int analogIrLeft = analogRead(IrSensorPinLeft);
   int analogIrRight = analogRead(IrSensorPinRight);
   int analogIrback = analogRead(IrSensorPinBack);
-  int readings = 50;
+  int readings = 500;
   bool detected = false;
   RecommendedDirectionIr = DirectionNone;
   int detectedLeft = 0;
@@ -229,15 +229,15 @@ bool ReadIrSensor(){
   while(readings)
   {
     readings--;
-    if(analogIrLeft < 100) {
+    if(analogIrLeft < 900) {
       detected = true;
       detectedLeft++;
     }
-    if(analogIrRight < 100) {
+    if(analogIrRight < 900) {
       detectedRight++;
       detected = true;
     }
-    if(analogIrback < 100)
+    if(analogIrback < 900)
     {
       detectedBack++;
       detected = true;
@@ -277,7 +277,7 @@ boolean ReadFenceSensors(){
   int attempts = 100;
   while (attempts> 0)
   {
-    if(left < 400)
+    if(left < 30)
     {
       RecommendedDirection = DirectionRight;
       Serial.println("Fence detected Left ");
@@ -293,7 +293,7 @@ boolean ReadFenceSensors(){
   attempts = 100;
   while (attempts> 0)
   {
-    if (right < 400)
+    if (right < 30)
     {
       RecommendedDirection = DirectionLeft;
       Serial.println("Fence detected Right ");
@@ -354,7 +354,7 @@ bool GetSensorState(){
     This is a basic alert from the sensors, if true, sensors are asking to turn arround.
     If false, sensors do not find anything.
   */
-  return ReadUltrasonicSensor() || ReadBumperSensors() || ReadFenceSensors();
+  return ReadUltrasonicSensor() || ReadBumperSensors();// || ReadFenceSensors();
 }
 
 int GetBatteryPercentage()
@@ -400,7 +400,7 @@ int GetBatteryPercentage()
   return 0;
 }
 
-void GetBatteryVoltage(){
+int GetBatteryVoltage(){
   // The reason this function is gated to every few cicles is to
   // avoid that sudden spikes or decreases cause the mower to
   // think the battery state is different from what it is
@@ -414,6 +414,7 @@ void GetBatteryVoltage(){
   CurrentVoltage = ((PreviousVoltage + CurrentVoltage + voltage)/3) + MarginVoltage;
   PreviousVoltage = prev;
   CurrentBatteryPercentage = GetBatteryPercentage();
+  return CurrentVoltage;
 }
 
 
@@ -429,13 +430,23 @@ void NavigateAndAvoidObstacles(String objective){
       if(ReadIrSensor())
       {
         if (RecommendedDirectionIr == DirectionCenter){
-          // base is on target now, continue
+          // base is on target now, continue and call is done
           CurrentSubMode = SUB_MODE_NAVIGATING;
           SetMoveFront();
-        } else {
+          return;
+        } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection();
-          SetMoveFront();
         }
+        SetMoveFront(); // move front just a bit for better view.
+        delay(1000);
+        SetStopWheels();
+        if(GetSensorState())
+        {
+          // we redirect here so we can continue on SUB_MODE_REDIRECTING_TOWARDS_BASE
+          Redirect();
+        }
+      } else {
+        SetStopWheels(); // lost signal of the base, this prevents the scape and prevent to keep collision.
       }
     }
     else if(CurrentSubMode == SUB_MODE_NAVIGATING)
@@ -444,12 +455,16 @@ void NavigateAndAvoidObstacles(String objective){
       if(GetSensorState())
       {
         CurrentSubMode = SUB_MODE_REDIRECTING;
-      }
-      if(!ReadIrSensor())
+      } else if(!ReadIrSensor())
       {
         CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
-        SetMoveBack();
-        delay(10000);
+        if(CicleCounter > 10)
+        {
+          // only move back if has been traveling some time ( # cycles )
+          SetMoveBack();
+          delay(10000);
+        }
+        SetStopWheels();
       }
     }
 }
@@ -462,9 +477,19 @@ void Redirect()
     // turn arround
     SetMoveBack();
     // time paused depends of the RPM of the motors and how long the mower been stuck
-    int upperLimit = 10000;
-    int lowerLimit =  4500;
-    delay(random(lowerLimit, upperLimit)); 
+    int upperLimit = 8000;
+    int lowerLimit =  1500;
+    if(CurrentSubMode != SUB_MODE_REDIRECTING_TOWARDS_BASE)
+    {
+      delay(random(lowerLimit, upperLimit));
+    } else {
+      delay(1000); // barely.
+    }
+    if(CicleCounter < 30)
+    {
+      // this means, it recently turned back, and might be stuck
+      upperLimit = 20000; // gives the chance to turn around a lot more
+    }
     if(RecommendedDirection == DirectionLeft)
     {
       SetMoveLeft();
@@ -475,7 +500,7 @@ void Redirect()
       SetMoveRight();
       delay(random(lowerLimit, upperLimit)); // trying to turn around
     }
-    delay(random(1000, 4000)); // wait a bit
+    delay(random(lowerLimit, upperLimit)); // wait a bit
     SetMoveFront();
     // continue for next cicle
     CurrentSubMode = SUB_MODE_NAVIGATING;
@@ -563,13 +588,13 @@ void SetModeByBatteryPercentage() {
 }
 
 void StopCuttingGrass(){  
-  digitalWrite(GrassCutterPin, LOW);
+  analogWrite(GrassCutterPin, 0);
 }
 void CutGrass(){
-  digitalWrite(GrassCutterPin, HIGH);
+  analogWrite(GrassCutterPin, 150);
 }
 
-void MoveToIrRecommendedDirection(){
+bool MoveToIrRecommendedDirection(){
       // it detects the base:
       if(RecommendedDirectionIr == DirectionLeft)
       {
@@ -577,8 +602,8 @@ void MoveToIrRecommendedDirection(){
         CutGrass();
         delay(random(2500, 4000));
         Serial.println("Move a bit to the left.");
-        SetMoveFront();
         RecommendedDirectionIr = DirectionNone;
+        return true;
       }
       else if (RecommendedDirectionIr == DirectionRight)
       {
@@ -586,8 +611,8 @@ void MoveToIrRecommendedDirection(){
         CutGrass();
         delay(random(2500, 4000));
         Serial.println("Move a bit to the right.");
-        SetMoveFront();
         RecommendedDirectionIr = DirectionNone;
+        return true;
       }
       else if (RecommendedDirectionIr == DirectionCenter)
       {
@@ -604,15 +629,16 @@ void MoveToIrRecommendedDirection(){
       }
       else if(RecommendedDirectionIr == DirectionBack){
         SetMoveBack();
-        delay(random(2000, 5000));
+        delay(random(5000, 10000));
         SetMoveRight();
-        delay(random(2000, 5000));
+        delay(random(3000, 7000));
         Serial.println("Trying to turn back");
-        SetMoveFront();
         RecommendedDirectionIr = DirectionNone;
+        return true;
       } else {
         Serial.println("ERROR: not recommended direction!!!!");
       }
+      return false;
 }
 
 void BlinkLedPin(int LedPinNumber, int Times){
@@ -637,34 +663,19 @@ void DontLoseIrBaseOfSight(){
         // already in sight
         if(RecommendedDirectionIr != DirectionCenter)
         {
-          MoveToIrRecommendedDirection();
+          if(MoveToIrRecommendedDirection()){
+            SetMoveFront();
+          }
           ReadIrSensor();
           int limit = 10000;
           while(RecommendedDirectionIr == DirectionBack && limit > 0)
           {
-            MoveToIrRecommendedDirection();
+            if(MoveToIrRecommendedDirection()){
+              SetMoveFront();
+            }
             ReadIrSensor();
             limit--;
           }
-        }
-      } else{
-        int limiter = 30000000;
-        if(WheelsGoing){
-          SetMoveBack();
-        }
-        while(!ReadIrSensor() && limiter > 0)
-        {
-          limiter--;
-          Serial.println("Looking for signal");
-          delay(100);
-        }
-        if(limiter > 0)
-        {
-          MoveToIrRecommendedDirection();
-          Serial.println("Found signal");
-        } else {
-          SetStopWheels();
-          Serial.println("Not Found signal");
         }
       }
     }
@@ -711,15 +722,21 @@ void loop()
     digitalWrite(RedLedPin, LOW);
     digitalWrite(BlueLedPin, LOW);
   }
-  if(CicleCounter > 0  && CicleCounter%50 == 0)
+  if(CicleCounter > 0 && CicleCounter%30 == 0)
   {
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
   }
-  if(CicleCounter > 0  && CicleCounter%100 == 0)
+  if(CicleCounter > 0  && CicleCounter%50 == 0)
   {
     DontLoseIrBaseOfSight();
   }
   SensorRunCicle++;
   CicleCounter++;
+  if(GetBatteryVoltage() < 10)
+  { 
+    SetStopWheels();
+    BlinkLedPin(RedLedPin, 2);
+    Serial.println("Battery protection triggered");
+  }
 }
