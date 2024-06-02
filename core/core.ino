@@ -28,6 +28,14 @@ D13: FREE
 int BlueLedPin = 10;
 int RedLedPin = 9;
 
+// the following variables were calculated  manually then corroborated by using chat GPT
+// using the follwoing parameters on my mower:
+// motor RPM: 5RPM
+// wheel separation: 20cm.
+// Wheel diameter: 17.8cm
+// to turn 180 degrees on perfect traction with 17.8 diameters wheels, separated by 20cm at rpm  6.74 seconds is enough
+const int TimeFor180DegreeTurn = 7;
+const int TimeFor90DegreeTurn = 4; // for a 90 degrees turn would be 3.37 seconds
 
 // fence readers
 int FencereaderPinLeft = A7;
@@ -159,12 +167,12 @@ void SetMoveBackToLocateIR(int time){
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(-1);
   delay(1000);
-  while(time>0 && !ReadBumperSensors() && !ReadIrSensor())
+  while(time>0 && !ReadBumperSensors() && ReadIrSensor()==0)
   {
     delay(1000);
     time--;
   }
-  if(!ActIfBumperStuck() && ReadIrSensor())
+  if(!ActIfBumperStuck() && ReadIrSensor()>0)
   {
     // it is not stuck and detected the IR sensor:
     SetStopWheels();
@@ -256,13 +264,15 @@ boolean ReadUltrasonicSensor(){
   return collisionDetected;
 }
 
-bool ReadIrSensor(){
+int ReadIrSensor(){
+  // in order to consider detected, 2 sensors have to have detected it.
+  // if only one sensor has it in range, it is required that the rover does not lose that signal,
+  // if only one sensor has it in range, we ask the rover to follow that direction
   int analogIrLeft = analogRead(IrSensorPinLeft);
   int analogIrRight = analogRead(IrSensorPinRight);
   int analogIrback = analogRead(IrSensorPinBack);
   int readings = 500;
-  bool detected = false;
-  RecommendedDirectionIr = DirectionNone;
+  int detectedSides = 0;
   int detectedLeft = 0;
   int detectedRight = 0;
   int detectedBack = 0;
@@ -272,48 +282,53 @@ bool ReadIrSensor(){
   {
     readings--;
     if(analogIrLeft < 900) {
-      detected = true;
       detectedLeft++;
     }
     if(analogIrRight < 900) {
       detectedRight++;
-      detected = true;
     }
     if(analogIrback < 1000)
     {
       detectedBack++;
-      detected = true;
     }
     analogIrLeft = analogRead(IrSensorPinLeft);
     analogIrRight = analogRead(IrSensorPinRight);
     analogIrback = analogRead(IrSensorPinBack);
-  }
-  if(detectedLeft>0 && detectedRight>0) {
-    // both sensors detect the base signal, so recommends to move fordwardish.
-    RecommendedDirectionIr = DirectionCenter;
-    RecommendedDirection = DirectionCenter;
-    Serial.println("Detected IR Center");
-  } else if (detectedRight > 0){
-    RecommendedDirectionIr = DirectionRight;
-    RecommendedDirection = DirectionRight;
-    Serial.println("Detected IR Right");
-  } else if (detectedLeft > 0){
-    RecommendedDirectionIr = DirectionLeft;
-    RecommendedDirection = DirectionLeft;
-    Serial.println("Detected IR Left");
-  } else if(detectedBack > 0){
-    Serial.println("Detected in the back!");
-    RecommendedDirectionIr = DirectionBack;
-    RecommendedDirection = DirectionBack;
-  } else {
-    Serial.println("Not Home detected!935664");
   }
   String debug1 = "Evaluated with [ R: ";
   debug1 = debug1 + detectedRight + " L: - ";
   debug1 =  debug1 + detectedLeft + " B: - ";
   debug1 =  debug1 + detectedBack + "]";
   Serial.println(debug1);
-  return detected;
+
+  if(detectedLeft>0 && detectedRight>0) {
+    // both sensors detect the base signal, so recommends to move fordwardish.
+    RecommendedDirectionIr = DirectionCenter;
+    RecommendedDirection = DirectionCenter;
+    Serial.println("Detected IR Center");
+    detectedSides = 2;
+  } else if (detectedRight > 0){
+    RecommendedDirectionIr = DirectionRight;
+    RecommendedDirection = DirectionRight;
+    Serial.println("Detected IR Right");
+    detectedSides++;
+  } else if (detectedLeft > 0){
+    RecommendedDirectionIr = DirectionLeft;
+    RecommendedDirection = DirectionLeft;
+    Serial.println("Detected IR Left");
+    detectedSides++;
+  } 
+  if(detectedBack > 0){
+    Serial.println("Detected in the back!");
+    if(detectedSides == 0)
+    {
+      // only detected in the back
+      RecommendedDirectionIr = DirectionBack;
+      RecommendedDirection = DirectionBack;
+    }
+    detectedSides++;
+  }
+  return detectedSides;
 }
 
 boolean ReadFenceSensors(){
@@ -466,7 +481,7 @@ void NavigateAndAvoidObstacles(String objective){
     else if(CurrentSubMode == SUB_MODE_REDIRECTING_TOWARDS_BASE)
     {
       // it went too far, it is trying to go closer to home
-      if(ReadIrSensor())
+      if(ReadIrSensor() > 0)
       {
         if (RecommendedDirectionIr == DirectionCenter){
           // base is on target now, continue and call is done
@@ -476,6 +491,7 @@ void NavigateAndAvoidObstacles(String objective){
         } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
           SetMoveFront(); // move front just a bit for better view.
+          delay(3);
         } else {
           Serial.println("Recommended direction not found: ");
           Serial.println(RecommendedDirectionIr);
@@ -494,7 +510,8 @@ void NavigateAndAvoidObstacles(String objective){
     else if(CurrentSubMode == SUB_MODE_NAVIGATING)
     {
       // Check sensors
-      if(!ReadIrSensor())
+      int sensorState = ReadIrSensor();
+      if(sensorState<1) // not detected properly
       {
         CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
         if(CicleCounter > 10)
@@ -504,6 +521,11 @@ void NavigateAndAvoidObstacles(String objective){
           Serial.println("Signal Lost, long back track.");
         }
         SetStopWheels();
+      }
+      else if(sensorState == 1 && RecommendedDirectionIr == DirectionBack)
+      {
+        // we only have contact in the back, we have to turn around.
+        MoveToIrRecommendedDirection("Returning to area.");
       }
       else if(DetectCollisionWithSensors())
       {
@@ -519,7 +541,7 @@ void Redirect()
     // Move back enough to not hit anything
     // turn arround
     // time paused depends of the RPM of the motors and how long the mower been stuck
-    int upperLimit = 8;
+    int upperLimit = 3;
     int lowerLimit =  2;
     if(CurrentSubMode != SUB_MODE_REDIRECTING_TOWARDS_BASE)
     {
@@ -527,10 +549,10 @@ void Redirect()
     } else {
       SetMoveBack(1); // barely.
     }
-    if(CicleCounter < 30)
+    if(CicleCounter < 10)
     {
-      // this means, it recently turned back, and might be stuck
-      upperLimit = 20; // seconds, gives the chance to turn around a lot more
+      // this means, it recently turned, and might be stuck
+      upperLimit = TimeFor180DegreeTurn; // TimeFor180DegreeTurn seconds, gives the chance to turn around a lot more
     }
     int wait_time = random(lowerLimit, upperLimit); // wait a bit
     if(RecommendedDirection == DirectionLeft)
@@ -640,7 +662,7 @@ bool MoveToIrRecommendedDirection(String debug){
       // it detects the base:
       if(RecommendedDirectionIr == DirectionLeft)
       {
-        SetMoveLeft(random(1, 3));
+        SetMoveLeft(TimeFor90DegreeTurn);
         CutGrass();
         Serial.println("Move a bit to the left.");
         RecommendedDirectionIr = DirectionNone;
@@ -648,7 +670,7 @@ bool MoveToIrRecommendedDirection(String debug){
       }
       else if (RecommendedDirectionIr == DirectionRight)
       {
-        SetMoveRight(random(1, 3));
+        SetMoveRight(TimeFor90DegreeTurn);
         CutGrass();
         Serial.println("Move a bit to the right.");
         RecommendedDirectionIr = DirectionNone;
@@ -662,14 +684,13 @@ bool MoveToIrRecommendedDirection(String debug){
           // Stop moving
           CurrentMode = MODE_CHARGING;
           SetStopWheels();
-          RecommendedDirectionIr = DirectionNone;
           Serial.println("Parcked for charging!");
           BlinkLedPin(BlueLedPin, 5);
         }
       }
       else if(RecommendedDirectionIr == DirectionBack){
         SetMoveBack(10);
-        SetMoveRight(random(3, 7));
+        SetMoveRight(TimeFor180DegreeTurn);
         Serial.println("Trying to turn back");
         RecommendedDirectionIr = DirectionNone;
         return true;
@@ -694,10 +715,11 @@ void BlinkLedPin(int LedPinNumber, int Times){
 }
 
 void DontLoseIrBaseOfSight(){
-    // to make sure
+  // The goal of this function is to help the rover to turn towards the IR source
+  // so it does not lose sight of it
     if(CurrentSubMode == SUB_MODE_NAVIGATING)
     {
-      if(ReadIrSensor())
+      if(ReadIrSensor() > 0)
       {
         // already in sight
         if(RecommendedDirectionIr != DirectionCenter)
@@ -705,16 +727,19 @@ void DontLoseIrBaseOfSight(){
           if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 1")){
             SetMoveFront();
           }
-          ReadIrSensor();
-          int limit = 10000;
-          while(RecommendedDirectionIr == DirectionBack && limit > 0)
-          {
-            if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2")){
-              SetMoveFront();
-            }
-            ReadIrSensor();
-            limit--;
+        }
+        int limit = 10000;
+        if(RecommendedDirectionIr == DirectionBack)
+        {
+            SetMoveBack(3);
+        }
+        while(RecommendedDirectionIr == DirectionBack && limit > 0)
+        {
+          if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2")){
+            SetMoveFront();
           }
+          ReadIrSensor();
+          limit--;
         }
       }
     }
@@ -729,7 +754,7 @@ void loop()
   {
     NavigateAndAvoidObstacles("RETURNING HOME");
     // Is home detected?
-    if(ReadIrSensor())
+    if(ReadIrSensor() > 0)
     {
       Serial.println("HOME DETECTED");
       MoveToIrRecommendedDirection("HOME DETECTED");
@@ -766,7 +791,7 @@ void loop()
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
   }
-  if(CicleCounter > 0  && CicleCounter%50 == 0)
+  if(CicleCounter > 0  && CicleCounter%25 == 0)
   {
     DontLoseIrBaseOfSight();
   }
