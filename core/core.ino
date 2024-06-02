@@ -491,7 +491,7 @@ void NavigateAndAvoidObstacles(String objective){
         } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
           SetMoveFront(); // move front just a bit for better view.
-          delay(3);
+          delay(3000);
         } else {
           Serial.println("Recommended direction not found: ");
           Serial.println(RecommendedDirectionIr);
@@ -526,6 +526,7 @@ void NavigateAndAvoidObstacles(String objective){
       {
         // we only have contact in the back, we have to turn around.
         MoveToIrRecommendedDirection("Returning to area.");
+        CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
       }
       else if(DetectCollisionWithSensors())
       {
@@ -731,15 +732,9 @@ void DontLoseIrBaseOfSight(){
         int limit = 10000;
         if(RecommendedDirectionIr == DirectionBack)
         {
-            SetMoveBack(3);
-        }
-        while(RecommendedDirectionIr == DirectionBack && limit > 0)
-        {
-          if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2")){
+            SetMoveBack(10);
+            MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2");
             SetMoveFront();
-          }
-          ReadIrSensor();
-          limit--;
         }
       }
     }
