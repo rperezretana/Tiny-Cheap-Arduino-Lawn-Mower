@@ -3,7 +3,7 @@
 Pins used:
 A1: IrSensorPinBack
 A2: GrassCutterPin
-A3: BumperButtonLeft
+A3: IrSensorPinFront
 A4: IrSensorPinLeft
 A5: IrSensorPinRight
 A6: FencereaderPinLeft
@@ -14,7 +14,7 @@ D4: BumperButtonRight
 D5: MotorPinLeft2
 D6: MotorPinLeft1
 D7: UltrasonicSensorRight
-D8: FREE
+D8: BumperButtonLeft
 D9: BlueLedPin
 D10: RedLedPin
 D11: UltrasonicSensorLeft
@@ -47,13 +47,14 @@ bool BatteryProtectionTriggeredStop = false;
 bool StoppedBecauseIROutOfRange = false;
 int LimitIrDetected = 10;
 int IrSensorPinBack = A1;
+int IrSensorPinFront = A3;
 int IrSensorPinRight = A4;
 int IrSensorPinLeft = A5;
 int RecommendedDirectionIr = 0;
 
 
 // bumper buttons
-int BumperButtonLeft = A3;
+int BumperButtonLeft = 8;
 int BumperButtonRight = 4;
 volatile byte StateBumperLeft = HIGH;
 volatile byte StateBumperRight = HIGH;
@@ -246,10 +247,10 @@ boolean ReadUltrasonicSensor(){
   DistancesDebug = DistancesDebug + distanceRight;
   Serial.println(DistancesDebug + " - bat: "+CurrentBatteryPercentage + ". V: "+CurrentVoltage + " - "+ CurrentMode + " Cicle: "+ CicleCounter);
 
-  int distanceAllowed = 30;
+  int distanceAllowed = 35;
   if(CurrentMode == MODE_RETURNING_HOME)
   {
-    distanceAllowed =  9;
+    distanceAllowed =  25;
   }
   boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < distanceAllowed;
   if(collisionDetected)
@@ -270,12 +271,14 @@ int ReadIrSensor(){
   // if only one sensor has it in range, we ask the rover to follow that direction
   int analogIrLeft = analogRead(IrSensorPinLeft);
   int analogIrRight = analogRead(IrSensorPinRight);
-  int analogIrback = analogRead(IrSensorPinBack);
-  int readings = 500;
+  int analogIrBack = analogRead(IrSensorPinBack);
+  int analogIrFront = analogRead(IrSensorPinFront);
+  int readings = 300;
   int detectedSides = 0;
   int detectedLeft = 0;
   int detectedRight = 0;
   int detectedBack = 0;
+  int detectedFront = 0;
   // does multiple readings to make sure all sensors capture data
   // TODO: replace by interrupts, it will remove the need of loop
   while(readings)
@@ -287,13 +290,18 @@ int ReadIrSensor(){
     if(analogIrRight < 900) {
       detectedRight++;
     }
-    if(analogIrback < 1000)
+    if(analogIrBack < 1000)
     {
       detectedBack++;
     }
+    if(analogIrFront < 1000)
+    {
+      detectedFront++;
+    }
     analogIrLeft = analogRead(IrSensorPinLeft);
     analogIrRight = analogRead(IrSensorPinRight);
-    analogIrback = analogRead(IrSensorPinBack);
+    analogIrBack = analogRead(IrSensorPinBack);
+    analogIrFront = analogRead(IrSensorPinFront);
   }
   String debug1 = "Evaluated with [ R: ";
   debug1 = debug1 + detectedRight + " L: - ";
@@ -307,6 +315,11 @@ int ReadIrSensor(){
     RecommendedDirection = DirectionCenter;
     Serial.println("Detected IR Center");
     detectedSides = 2;
+  } else if(detectedFront > 0){
+    RecommendedDirectionIr = DirectionCenter;
+    RecommendedDirection = DirectionCenter;
+    Serial.println("Detected IR Front");
+    detectedSides++;
   } else if (detectedRight > 0){
     RecommendedDirectionIr = DirectionRight;
     RecommendedDirection = DirectionRight;
@@ -471,6 +484,14 @@ int GetBatteryVoltage(){
   return CurrentVoltage;
 }
 
+void MoveFordwardABit(int seconds){
+  if(!DetectCollisionWithSensors())
+  {
+    SetMoveFront(); // move front just a bit for better view.
+    delay(seconds*1000);
+  }
+}
+
 
 void NavigateAndAvoidObstacles(String objective){
     if (CurrentSubMode == SUB_MODE_REDIRECTING)
@@ -490,8 +511,7 @@ void NavigateAndAvoidObstacles(String objective){
           SetMoveFront();
         } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
-          SetMoveFront(); // move front just a bit for better view.
-          delay(3000);
+          MoveFordwardABit(3);
         } else {
           Serial.println("Recommended direction not found: ");
           Serial.println(RecommendedDirectionIr);
@@ -503,6 +523,8 @@ void NavigateAndAvoidObstacles(String objective){
         }
         CutGrass();
       } else {
+        MoveToIrRecommendedDirection("Lost signal. Move towards last known location");
+        MoveFordwardABit(3);
         SetStopWheels(); // lost signal of the base, this prevents the scape and prevent to keep collision.
         Serial.println("Lost signal, waiting for one.");
       }
@@ -511,22 +533,29 @@ void NavigateAndAvoidObstacles(String objective){
     {
       // Check sensors
       int sensorState = ReadIrSensor();
-      if(sensorState<1) // not detected properly
+      if(sensorState==0) // not detected, we have to turn back or try to turn towards it when detected
       {
         CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
         if(CicleCounter > 10)
         {
           // only move back if has been traveling some time ( # cycles )
-          SetMoveBackToLocateIR(CicleCounter);
+          SetMoveBackToLocateIR(10 + CicleCounter);
           Serial.println("Signal Lost, long back track.");
         }
         SetStopWheels();
       }
-      else if(sensorState == 1 && RecommendedDirectionIr == DirectionBack)
+      else if(sensorState == 1)
       {
-        // we only have contact in the back, we have to turn around.
-        MoveToIrRecommendedDirection("Returning to area.");
-        CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
+        if(RecommendedDirectionIr == DirectionBack)
+        {
+          // we only have contact in the back, we have to turn around until we have good
+          CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
+          MoveToIrRecommendedDirection("Returning to area.");
+        } else {
+          // we only have contact with one sensor, so we turn to that sensor side
+          // it is expected to have good contact with the IR, so more than 1 sensor.
+          MoveToIrRecommendedDirection("Turning towards sensor.");
+        }
       }
       else if(DetectCollisionWithSensors())
       {
@@ -729,7 +758,6 @@ void DontLoseIrBaseOfSight(){
             SetMoveFront();
           }
         }
-        int limit = 10000;
         if(RecommendedDirectionIr == DirectionBack)
         {
             SetMoveBack(10);
@@ -786,7 +814,7 @@ void loop()
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
   }
-  if(CicleCounter > 0  && CicleCounter%25 == 0)
+  if(CicleCounter > 0  && CicleCounter%15 == 0)
   {
     DontLoseIrBaseOfSight();
   }
