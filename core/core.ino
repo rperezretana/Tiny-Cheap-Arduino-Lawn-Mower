@@ -1,6 +1,7 @@
 #include <Arduino.h>
 /*
 Pins used:
+A0: Voltage
 A1: IrSensorPinBack
 A2: GrassCutterPin
 A3: IrSensorPinFront
@@ -308,8 +309,12 @@ int ReadIrSensor(){
   debug1 =  debug1 + detectedLeft + " B: - ";
   debug1 =  debug1 + detectedBack + "]";
   Serial.println(debug1);
-
-  if(detectedLeft>0 && detectedRight>0) {
+if(detectedBack > 0){
+    Serial.println("Detected in the back!");
+    RecommendedDirectionIr = DirectionBack;
+    RecommendedDirection = DirectionBack;
+    detectedSides++;
+} else if(detectedLeft>0 && detectedRight>0) {
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
@@ -331,16 +336,7 @@ int ReadIrSensor(){
     Serial.println("Detected IR Left");
     detectedSides++;
   } 
-  if(detectedBack > 0){
-    Serial.println("Detected in the back!");
-    if(detectedSides == 0)
-    {
-      // only detected in the back
-      RecommendedDirectionIr = DirectionBack;
-      RecommendedDirection = DirectionBack;
-    }
-    detectedSides++;
-  }
+  
   return detectedSides;
 }
 
