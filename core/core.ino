@@ -168,7 +168,7 @@ void SetMoveFront(){
 void SetMoveBackToLocateIR(int time){
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(-1);
-  delay(1000);
+  delay(1000); // initial delay to help remove preassure
   while(time>0 && !ReadBumperSensors() && ReadIrSensor()==0)
   {
     delay(1000);
@@ -481,10 +481,14 @@ int GetBatteryVoltage(){
 }
 
 void MoveFordwardABit(int seconds){
-  if(!DetectCollisionWithSensors())
+  SetMoveFront(); // move front just a bit for better view.
+  while(seconds>0)
   {
-    SetMoveFront(); // move front just a bit for better view.
-    delay(seconds*1000);
+    if(!DetectCollisionWithSensors())
+    {
+      delay(1000);
+    }
+    seconds--;
   }
 }
 
