@@ -309,17 +309,13 @@ int ReadIrSensor(){
   debug1 =  debug1 + detectedLeft + " B: - ";
   debug1 =  debug1 + detectedBack + "]";
   Serial.println(debug1);
-if(detectedBack > 0){
-    Serial.println("Detected in the back!");
-    RecommendedDirectionIr = DirectionBack;
-    RecommendedDirection = DirectionBack;
-    detectedSides++;
-} else if(detectedLeft>0 && detectedRight>0) {
+
+  if(detectedLeft>0 && detectedRight>0 && detectedFront > 0) {
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
     Serial.println("Detected IR Center");
-    detectedSides = 2;
+    detectedSides = 3;
   } else if(detectedFront > 0){
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
@@ -335,7 +331,18 @@ if(detectedBack > 0){
     RecommendedDirection = DirectionLeft;
     Serial.println("Detected IR Left");
     detectedSides++;
-  } 
+  }
+
+  if(detectedBack > 0){
+    Serial.println("Detected in the back!");
+    if(detectedSides == 0)
+    {
+      // only detected in the back
+      RecommendedDirectionIr = DirectionBack;
+      RecommendedDirection = DirectionBack;
+    }
+    detectedSides++;
+  }
   
   return detectedSides;
 }
@@ -487,6 +494,8 @@ void MoveFordwardABit(int seconds){
     if(!DetectCollisionWithSensors())
     {
       delay(1000);
+    } else {
+      SetStopWheels();
     }
     seconds--;
   }
@@ -508,7 +517,7 @@ void NavigateAndAvoidObstacles(String objective){
           // base is on target now, continue and call is done
           CurrentSubMode = SUB_MODE_NAVIGATING;
           Serial.println("Transision to SUB_MODE_NAVIGATING");
-          SetMoveFront();
+          MoveFordwardABit(1);
         } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
           MoveFordwardABit(3);
@@ -516,17 +525,18 @@ void NavigateAndAvoidObstacles(String objective){
           Serial.println("Recommended direction not found: ");
           Serial.println(RecommendedDirectionIr);
         }
-        if(DetectCollisionWithSensors())
-        {
-          // we redirect here so we can continue on SUB_MODE_REDIRECTING_TOWARDS_BASE
-          Redirect();
-        }
+        MoveFordwardABit(1);
         CutGrass();
       } else {
         MoveToIrRecommendedDirection("Lost signal. Move towards last known location");
         MoveFordwardABit(3);
         SetStopWheels(); // lost signal of the base, this prevents the scape and prevent to keep collision.
         Serial.println("Lost signal, waiting for one.");
+      }
+      if(DetectCollisionWithSensors())
+      {
+        // we redirect here so we can continue on SUB_MODE_REDIRECTING_TOWARDS_BASE
+        Redirect();
       }
     }
     else if(CurrentSubMode == SUB_MODE_NAVIGATING)
@@ -556,8 +566,7 @@ void NavigateAndAvoidObstacles(String objective){
           // it is expected to have good contact with the IR, so more than 1 sensor.
           MoveToIrRecommendedDirection("Turning towards sensor.");
         }
-      }
-      else if(DetectCollisionWithSensors())
+      } else if(DetectCollisionWithSensors())
       {
         CurrentSubMode = SUB_MODE_REDIRECTING;
       }
@@ -577,7 +586,7 @@ void Redirect()
     {
       SetMoveBack(random(lowerLimit, upperLimit));
     } else {
-      SetMoveBack(1); // barely.
+      SetMoveBack(2); // barely.
     }
     if(CicleCounter < 10)
     {
@@ -592,9 +601,9 @@ void Redirect()
       SetMoveRight(wait_time);
     } else if(RecommendedDirection == DirectionBack)
     {
-      SetMoveRight(wait_time*2);
+      SetMoveRight(TimeFor180DegreeTurn);
     }
-    SetMoveFront();
+    MoveFordwardABit(1);
     // continue for next cicle
     CurrentSubMode = SUB_MODE_NAVIGATING;
     CicleCounter=0;
@@ -777,7 +786,7 @@ void loop()
   {
     NavigateAndAvoidObstacles("RETURNING HOME");
     // Is home detected?
-    if(ReadIrSensor() > 0)
+    if(ReadIrSensor() > 0 && !DetectCollisionWithSensors())
     {
       Serial.println("HOME DETECTED");
       MoveToIrRecommendedDirection("HOME DETECTED");
@@ -814,7 +823,7 @@ void loop()
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
   }
-  if(CicleCounter > 0  && CicleCounter%15 == 0)
+  if(CicleCounter > 0  && CicleCounter%25 == 0)
   {
     DontLoseIrBaseOfSight();
   }
@@ -836,4 +845,10 @@ void loop()
   // {
   //   SetMoveFront();
   // }
+  if(ReadBumperSensors())
+  {
+    SetMoveBack(1);
+    delay(500);
+    SetStopWheels();
+  }
 }
