@@ -149,11 +149,13 @@ void SetMoveRightMotor(int direction){
 }
 
 void SetMoveLeft(int time){
+  WheelsGoing = true;
   SetMoveLeftMotor(1);
   SetMoveRightMotor(-1);
   MovingWhileDetectedBumperStuck(time);
 }
 void SetMoveRight(int time){
+  WheelsGoing = true;
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(1);
   MovingWhileDetectedBumperStuck(time);
@@ -249,10 +251,6 @@ boolean ReadUltrasonicSensor(){
   Serial.println(DistancesDebug + " - bat: "+CurrentBatteryPercentage + ". V: "+CurrentVoltage + " - "+ CurrentMode + " Cicle: "+ CicleCounter);
 
   int distanceAllowed = 35;
-  if(CurrentMode == MODE_RETURNING_HOME)
-  {
-    distanceAllowed =  25;
-  }
   boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < distanceAllowed;
   if(collisionDetected)
   {
@@ -566,6 +564,7 @@ void NavigateAndAvoidObstacles(String objective){
           // it is expected to have good contact with the IR, so more than 1 sensor.
           MoveToIrRecommendedDirection("Turning towards sensor.");
         }
+        MoveFordwardABit(1);
       } else if(DetectCollisionWithSensors())
       {
         CurrentSubMode = SUB_MODE_REDIRECTING;
@@ -683,6 +682,7 @@ void SetModeByBatteryPercentage() {
   else if(CurrentBatteryPercentage < chargedAtPercentage)
   {
     if(CurrentMode == MODE_CHARGING || CurrentMode == MODE_RESTING) {
+      SetStopWheels();
       BlinkLedPin(RedLedPin, CurrentBatteryPercentage/10);
       delay(1000);
     }
@@ -764,14 +764,14 @@ void DontLoseIrBaseOfSight(){
         if(RecommendedDirectionIr != DirectionCenter)
         {
           if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 1")){
-            SetMoveFront();
+            MoveFordwardABit(1);
           }
         }
         if(RecommendedDirectionIr == DirectionBack)
         {
             SetMoveBack(10);
             MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2");
-            SetMoveFront();
+            MoveFordwardABit(1);
         }
       }
     }
@@ -781,6 +781,10 @@ void loop()
 {
   if(CurrentMode == MODE_MOWING) {
      NavigateAndAvoidObstacles("MOWING");
+     if(WheelsGoing == false && !DetectCollisionWithSensors())
+     {
+        MoveFordwardABit(1);
+     }
   }
   else if(CurrentMode ==  MODE_RETURNING_HOME)
   {
@@ -790,6 +794,9 @@ void loop()
     {
       Serial.println("HOME DETECTED");
       MoveToIrRecommendedDirection("HOME DETECTED");
+      SetMoveFront();
+    } else {
+      SetStopWheels();
     }
   }
   else if(CurrentMode == MODE_RESTING)
@@ -822,9 +829,6 @@ void loop()
   {
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
-  }
-  if(CicleCounter > 0  && CicleCounter%25 == 0)
-  {
     DontLoseIrBaseOfSight();
   }
   if(GetBatteryVoltage() < 10)
@@ -835,7 +839,10 @@ void loop()
     Serial.println("Battery protection triggered");
   } else if (BatteryProtectionTriggeredStop) {
     BatteryProtectionTriggeredStop = false;
-    SetMoveFront();
+    if(!DetectCollisionWithSensors())
+    {
+      SetMoveFront();
+    }
   }
   SensorRunCicle++;
   CicleCounter++;
@@ -845,9 +852,9 @@ void loop()
   // {
   //   SetMoveFront();
   // }
-  if(ReadBumperSensors())
+  if(ReadBumperSensors() && WheelsGoing)
   {
-    SetMoveBack(1);
+    SetMoveBack(10);
     delay(500);
     SetStopWheels();
   }
