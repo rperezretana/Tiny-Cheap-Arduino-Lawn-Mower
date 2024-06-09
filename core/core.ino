@@ -162,9 +162,12 @@ void SetMoveRight(int time){
 }
 
 void SetMoveFront(){
-  WheelsGoing = true;
-  SetMoveLeftMotor(1);
-  SetMoveRightMotor(1);
+  if(!ReadBumperSensors())
+  {
+    WheelsGoing = true;
+    SetMoveLeftMotor(1);
+    SetMoveRightMotor(1);
+  }
 }
 
 void SetMoveBackToLocateIR(int time){
@@ -229,6 +232,10 @@ int ReadSingleUltrasonicSensor(int sensor){
 
 int MulticheckUltrasonicDistance(int sensor)
 {
+  /*
+    The sensors seem not to be 100% reliable,
+    so we perfor multiple test, and always get the max number.
+  */
   int verifications = 25;
   int distance =  1;
   while(verifications>0)
@@ -348,36 +355,48 @@ int ReadIrSensor(){
 boolean ReadFenceSensors(){
   Serial.println("Evaluating Fence");
   int left = analogRead(FencereaderPinLeft);
-  int attempts = 150;
-  while (attempts> 0)
+  int leftPositives = 0;
+  int rightPositives = 0;
+  int thresholdReadings = 50;
+  int thresHoldTimes = 150;
+  int attempts = 300;
+  int attemptsL = attempts;
+  while (attemptsL> 0)
   {
-    if(left < 30)
+    if(left > thresholdReadings)
     {
-      RecommendedDirection = DirectionRight;
       Serial.println("Fence detected Left ");
+      Serial.println(left);
+      leftPositives++;
       // return true;
     }
     left = analogRead(FencereaderPinLeft);
-    attempts--;
+    attemptsL--;
   }
   int right = analogRead(FencereaderPinRight);
-  attempts = 150;
-  while (attempts> 0)
+  int attemptsR = attempts;
+  while (attemptsR> 0)
   {
-    if (right < 30)
+    if (right > thresholdReadings)
     {
-      RecommendedDirection = DirectionLeft;
       Serial.println("Fence detected Right ");
-      // return true;
+      Serial.println(right);
+      rightPositives++;
     }
     right = analogRead(FencereaderPinRight);
-    attempts--;
+    attemptsR--;
+  }
+  if(leftPositives > rightPositives)
+  {
+    RecommendedDirection = DirectionLeft;
+  } else {
+    RecommendedDirection = DirectionRight;
   }
   Serial.print(left);
   Serial.print(" -- ");
   Serial.print(right);
   Serial.println(" - ");
-  return false;
+  return leftPositives > thresHoldTimes || rightPositives > thresHoldTimes;
 }
 
 
@@ -390,8 +409,10 @@ void setup()
   pinMode(BumperButtonLeft, INPUT_PULLUP);
   pinMode(BumperButtonRight, INPUT_PULLUP);
 
+  pinMode(FencereaderPinLeft, INPUT);
+  pinMode(FencereaderPinRight, INPUT);
+
   pinMode(IrSensorPinBack, INPUT);
-  digitalWrite(IrSensorPinBack, LOW);
   pinMode(IrSensorPinLeft, INPUT);
   pinMode(IrSensorPinRight, INPUT);
   pinMode(RedLedPin, OUTPUT);
@@ -581,6 +602,7 @@ void Redirect()
     // time paused depends of the RPM of the motors and how long the mower been stuck
     int upperLimit = 3;
     int lowerLimit =  2;
+    int wait_time = random(lowerLimit, upperLimit); // wait a bit
     if(CurrentSubMode != SUB_MODE_REDIRECTING_TOWARDS_BASE)
     {
       SetMoveBack(random(lowerLimit, upperLimit));
@@ -592,7 +614,6 @@ void Redirect()
       // this means, it recently turned, and might be stuck
       upperLimit = TimeFor180DegreeTurn; // TimeFor180DegreeTurn seconds, gives the chance to turn around a lot more
     }
-    int wait_time = random(lowerLimit, upperLimit); // wait a bit
     if(RecommendedDirection == DirectionLeft)
     {
       SetMoveLeft(wait_time);
@@ -783,8 +804,9 @@ void loop()
      NavigateAndAvoidObstacles("MOWING");
      if(WheelsGoing == false && !DetectCollisionWithSensors())
      {
-        MoveFordwardABit(1);
+      SetMoveFront();
      }
+     CutGrass();
   }
   else if(CurrentMode ==  MODE_RETURNING_HOME)
   {
@@ -839,22 +861,28 @@ void loop()
     Serial.println("Battery protection triggered");
   } else if (BatteryProtectionTriggeredStop) {
     BatteryProtectionTriggeredStop = false;
-    if(!DetectCollisionWithSensors())
-    {
-      SetMoveFront();
-    }
+    SetMoveFront();
   }
   SensorRunCicle++;
   CicleCounter++;
-  // ReadFenceSensors();
-  // delay(2000);
-  // if(CicleCounter>15)
-  // {
-  //   SetMoveFront();
-  // }
+  Serial.println(CicleCounter);
+  if(CicleCounter%10==0 && WheelsGoing)
+  {
+    SetStopWheels();
+    delay(500);
+    BlinkLedPin(BlueLedPin, 3);
+    if(ReadFenceSensors())
+    {
+      CurrentSubMode = SUB_MODE_REDIRECTING;
+    } else{
+      SetMoveFront();
+    }
+    CutGrass();
+  }
+  
   if(ReadBumperSensors() && WheelsGoing)
   {
-    SetMoveBack(10);
+    SetMoveBack(3);
     delay(500);
     SetStopWheels();
   }
