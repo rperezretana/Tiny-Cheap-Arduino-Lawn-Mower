@@ -117,9 +117,9 @@ void SetUpMotorPins(){
 }
 
 bool WheelsGoing = false;
-void SetStopWheels()//String debug)
+void SetStopWheels(String debug)
 {
-    //Serial.println("SetStopWheels: "+debug);
+    Serial.println("SetStopWheels: "+debug);
     WheelsGoing = false;
     StopCuttingGrass();
     analogWrite(MotorPinLeft1, LOW);
@@ -162,11 +162,13 @@ void SetMoveRight(int time){
 }
 
 void SetMoveFront(){
-  if(!ReadBumperSensors())
+  if(!ReadUltrasonicSensor(40) && !ReadBumperSensors())
   {
     WheelsGoing = true;
     SetMoveLeftMotor(1);
     SetMoveRightMotor(1);
+  } else {
+    Serial.println("Collision detected, cant move front.");
   }
 }
 
@@ -182,13 +184,14 @@ void SetMoveBackToLocateIR(int time){
   if(!ActIfBumperStuck() && ReadIrSensor()>0)
   {
     // it is not stuck and detected the IR sensor:
-    SetStopWheels();
+    SetStopWheels("ActIfBumperStuck");
   }
 }
 void SetMoveBack(int time){
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(-1);
   MovingWhileDetectedBumperStuck(time);
+  CicleCounter = 0;
 }
 
 void MovingWhileDetectedBumperStuck(int time){
@@ -208,7 +211,7 @@ boolean ActIfBumperStuck(){
   {
     SetMoveFront();
     delay(500); // release button to prevent further damage
-    SetStopWheels();
+    SetStopWheels("ActIfBumperStuck");
     CurrentMode = MODE_STUCK; // stop mower completely, it is stuck
     return true;
   }
@@ -220,7 +223,6 @@ boolean ActIfBumperStuck(){
 */
 
 int ReadSingleUltrasonicSensor(int sensor){
-  delay(20);
   pinMode(sensor, OUTPUT);
   digitalWrite(sensor, LOW);
   digitalWrite(sensor, HIGH);
@@ -243,10 +245,15 @@ int MulticheckUltrasonicDistance(int sensor)
     distance = max(ReadSingleUltrasonicSensor(sensor), distance);
     verifications--;
   }
-  return distance;
+  return min(distance, 500);
 }
 
-boolean ReadUltrasonicSensor(){
+boolean ReadUltrasonicSensor()
+{
+ return ReadUltrasonicSensor(20);
+}
+
+boolean ReadUltrasonicSensor(int distanceAllowed){
   DistancesDebug = "Dis:";
   int distanceLeft = MulticheckUltrasonicDistance(UltrasonicSensorLeft);
   int distanceCenter = MulticheckUltrasonicDistance(UltrasonicSensorCenter);
@@ -257,7 +264,6 @@ boolean ReadUltrasonicSensor(){
   DistancesDebug = DistancesDebug + distanceRight;
   Serial.println(DistancesDebug + " - bat: "+CurrentBatteryPercentage + ". V: "+CurrentVoltage + " - "+ CurrentMode + " Cicle: "+ CicleCounter);
 
-  int distanceAllowed = 35;
   boolean collisionDetected = min(distanceLeft, min(distanceCenter, distanceRight)) < distanceAllowed;
   if(collisionDetected)
   {
@@ -280,6 +286,7 @@ int ReadIrSensor(){
   int analogIrBack = analogRead(IrSensorPinBack);
   int analogIrFront = analogRead(IrSensorPinFront);
   int readings = 300;
+  int threshold = 1; // readings detected, to filter false positives
   int detectedSides = 0;
   int detectedLeft = 0;
   int detectedRight = 0;
@@ -315,30 +322,30 @@ int ReadIrSensor(){
   debug1 =  debug1 + detectedBack + "]";
   Serial.println(debug1);
 
-  if(detectedLeft>0 && detectedRight>0 && detectedFront > 0) {
+  if(detectedLeft>threshold && detectedRight>threshold && detectedFront > threshold) {
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
     Serial.println("Detected IR Center");
     detectedSides = 3;
-  } else if(detectedFront > 0){
+  } else if(detectedFront > threshold){
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
     Serial.println("Detected IR Front");
     detectedSides++;
-  } else if (detectedRight > 0){
+  } else if (detectedRight > threshold){
     RecommendedDirectionIr = DirectionRight;
     RecommendedDirection = DirectionRight;
     Serial.println("Detected IR Right");
     detectedSides++;
-  } else if (detectedLeft > 0){
+  } else if (detectedLeft > threshold){
     RecommendedDirectionIr = DirectionLeft;
     RecommendedDirection = DirectionLeft;
     Serial.println("Detected IR Left");
     detectedSides++;
   }
 
-  if(detectedBack > 0){
+  if(detectedBack > threshold){
     Serial.println("Detected in the back!");
     if(detectedSides == 0)
     {
@@ -357,7 +364,7 @@ boolean ReadFenceSensors(){
   int left = analogRead(FencereaderPinLeft);
   int leftPositives = 0;
   int rightPositives = 0;
-  int thresholdReadings = 50;
+  int thresholdReadings = 900; // TODO: adjust
   int thresHoldTimes = 150;
   int attempts = 300;
   int attemptsL = attempts;
@@ -514,7 +521,7 @@ void MoveFordwardABit(int seconds){
     {
       delay(1000);
     } else {
-      SetStopWheels();
+      SetStopWheels("Move forward a bit - Collision.");
     }
     seconds--;
   }
@@ -546,13 +553,12 @@ void NavigateAndAvoidObstacles(String objective){
         }
         MoveFordwardABit(1);
         CutGrass();
-      } else {
-        MoveToIrRecommendedDirection("Lost signal. Move towards last known location");
-        MoveFordwardABit(3);
-        SetStopWheels(); // lost signal of the base, this prevents the scape and prevent to keep collision.
+      } else if(WheelsGoing) {
+        MoveToIrRecommendedDirection("Move towards last known location");
+        SetStopWheels("lost signal of the base"); // lost signal of the base, this prevents the scape and prevent to keep collision.
         Serial.println("Lost signal, waiting for one.");
       }
-      if(DetectCollisionWithSensors())
+      if(WheelsGoing && DetectCollisionWithSensors())
       {
         // we redirect here so we can continue on SUB_MODE_REDIRECTING_TOWARDS_BASE
         Redirect();
@@ -571,7 +577,7 @@ void NavigateAndAvoidObstacles(String objective){
           SetMoveBackToLocateIR(10 + CicleCounter);
           Serial.println("Signal Lost, long back track.");
         }
-        SetStopWheels();
+        SetStopWheels("Signal Lost, long back track.");
       }
       else if(sensorState == 1)
       {
@@ -668,7 +674,7 @@ void SetModeByBatteryPercentage() {
   else if(CurrentBatteryPercentage < LowerLimit && MakeSureVoltageIsLessThan(LowerLimit)) {
       if(CurrentMode != MODE_RESTING)
       {
-        SetStopWheels();
+        SetStopWheels("Measure battery");
         delay(3000);
         if(MakeSureVoltageIsLessThan(LowerLimit))
         {
@@ -678,7 +684,7 @@ void SetModeByBatteryPercentage() {
           Serial.println(CicleCounter);
           Serial.println(" - Battery less than 5%: ");
           Serial.println(CurrentBatteryPercentage);
-          SetStopWheels();
+          SetStopWheels("Low battery");
           BlinkLedPin(RedLedPin, 2);
           BlinkLedPin(BlueLedPin, 2);
         } else {
@@ -703,7 +709,7 @@ void SetModeByBatteryPercentage() {
   else if(CurrentBatteryPercentage < chargedAtPercentage)
   {
     if(CurrentMode == MODE_CHARGING || CurrentMode == MODE_RESTING) {
-      SetStopWheels();
+      SetStopWheels("MODE_RESTING - MODE_CHARGING");
       BlinkLedPin(RedLedPin, CurrentBatteryPercentage/10);
       delay(1000);
     }
@@ -743,7 +749,7 @@ bool MoveToIrRecommendedDirection(String debug){
         {
           // Stop moving
           CurrentMode = MODE_CHARGING;
-          SetStopWheels();
+          SetStopWheels("MODE_CHARGING");
           Serial.println("Parcked for charging!");
           BlinkLedPin(BlueLedPin, 5);
         }
@@ -802,8 +808,9 @@ void loop()
 {
   if(CurrentMode == MODE_MOWING) {
      NavigateAndAvoidObstacles("MOWING");
-     if(WheelsGoing == false && !DetectCollisionWithSensors())
+     if(WheelsGoing == false && !DetectCollisionWithSensors() && ReadIrSensor() > 1)
      {
+      Serial.println("Move forward since MODE_MOWING.");
       SetMoveFront();
      }
      CutGrass();
@@ -818,12 +825,12 @@ void loop()
       MoveToIrRecommendedDirection("HOME DETECTED");
       SetMoveFront();
     } else {
-      SetStopWheels();
+      SetStopWheels("No IR detected when returning home.");
     }
   }
   else if(CurrentMode == MODE_RESTING)
   {
-    SetStopWheels();
+    SetStopWheels("MODE_RESTING");
     digitalWrite(BlueLedPin, LOW);
     digitalWrite(RedLedPin, LOW);
     BlinkLedPin(RedLedPin, 3);
@@ -832,14 +839,13 @@ void loop()
   }
   else if(CurrentMode == MODE_CHARGING)
   {
-    SetStopWheels();
+    SetStopWheels("MODE_CHARGING");
     BlinkLedPin(RedLedPin, CurrentBatteryPercentage/10);
     Serial.println("Low Battery - Charging");
     SensorRunCicle = 0;
   }
   else if(CurrentMode == MODE_STUCK){
-    Serial.println("Unknown error/state flash all leds");
-    SetStopWheels();
+    SetStopWheels("Unknown error/state flash all leds");
     /// Unknown error/state flash all leds:
     digitalWrite(RedLedPin, HIGH);
     digitalWrite(BlueLedPin, HIGH);
@@ -856,7 +862,7 @@ void loop()
   if(GetBatteryVoltage() < 10)
   { 
     BatteryProtectionTriggeredStop = WheelsGoing;
-    SetStopWheels();
+    SetStopWheels("Battery protection triggered");
     BlinkLedPin(RedLedPin, 2);
     Serial.println("Battery protection triggered");
   } else if (BatteryProtectionTriggeredStop) {
@@ -866,24 +872,25 @@ void loop()
   SensorRunCicle++;
   CicleCounter++;
   Serial.println(CicleCounter);
-  if(CicleCounter%10==0 && WheelsGoing)
+
+  if(CicleCounter>0 && CicleCounter%30==0 && WheelsGoing)
   {
-    SetStopWheels();
+    SetStopWheels("ReadFenceSensors.");
     delay(500);
     BlinkLedPin(BlueLedPin, 3);
     if(ReadFenceSensors())
     {
-      CurrentSubMode = SUB_MODE_REDIRECTING;
+      CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
     } else{
       SetMoveFront();
     }
     CutGrass();
   }
   
-  if(ReadBumperSensors() && WheelsGoing)
+  if(WheelsGoing && (ReadBumperSensors() || ReadUltrasonicSensor(5)))
   {
     SetMoveBack(3);
     delay(500);
-    SetStopWheels();
+    SetStopWheels("Emergency stop ReadBumperSensors");
   }
 }
