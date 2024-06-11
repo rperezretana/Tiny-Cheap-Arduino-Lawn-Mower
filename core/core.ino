@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <SoftwareSerial.h>
+
 /*
 Pins used:
 A0: Voltage
@@ -410,7 +412,7 @@ boolean ReadFenceSensors(){
 // Setup robot microcontroller initial state.
 void setup()
 {  
-  Serial.begin(115200);
+  Serial.begin(9600);
   SetUpMotorPins();
   // bumper setup
   pinMode(BumperButtonLeft, INPUT_PULLUP);
