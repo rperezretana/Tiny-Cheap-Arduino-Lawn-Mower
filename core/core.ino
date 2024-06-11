@@ -35,8 +35,8 @@ int RedLedPin = 9;
 // wheel separation: 20cm.
 // Wheel diameter: 17.8cm
 // to turn 180 degrees on perfect traction with 17.8 diameters wheels, separated by 20cm at rpm  6.74 seconds is enough
-const int TimeFor180DegreeTurn = 7;
-const int TimeFor90DegreeTurn = 4; // for a 90 degrees turn would be 3.37 seconds
+const int TimeFor180DegreeTurn = 6;
+const int TimeFor90DegreeTurn = 3; // for a 90 degrees turn would be 3.37 seconds
 
 // fence readers
 int FencereaderPinLeft = A7;
@@ -162,7 +162,7 @@ void SetMoveRight(int time){
 }
 
 void SetMoveFront(){
-  if(!ReadUltrasonicSensor(40) && !ReadBumperSensors())
+  if(!ReadBumperSensors())
   {
     WheelsGoing = true;
     SetMoveLeftMotor(1);
@@ -513,6 +513,28 @@ int GetBatteryVoltage(){
   return CurrentVoltage;
 }
 
+void ProtectBattery(){
+  if(GetBatteryVoltage() < 10)
+  { 
+    BatteryProtectionTriggeredStop = WheelsGoing;
+    SetStopWheels("Battery protection triggered");
+    BlinkLedPin(RedLedPin, 2);
+    Serial.println("Battery protection triggered");
+  } else if (BatteryProtectionTriggeredStop) {
+    BatteryProtectionTriggeredStop = false;
+    SetMoveFront();
+  }
+}
+
+void ProtectBumpers() {
+  if(WheelsGoing && (ReadBumperSensors() || ReadUltrasonicSensor(5)))
+  {
+    SetMoveBack(3);
+    delay(500);
+    SetStopWheels("Emergency stop ReadBumperSensors");
+  }
+}
+
 void MoveFordwardABit(int seconds){
   SetMoveFront(); // move front just a bit for better view.
   while(seconds>0)
@@ -543,10 +565,8 @@ void NavigateAndAvoidObstacles(String objective){
           // base is on target now, continue and call is done
           CurrentSubMode = SUB_MODE_NAVIGATING;
           Serial.println("Transision to SUB_MODE_NAVIGATING");
-          MoveFordwardABit(1);
         } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
-          MoveFordwardABit(3);
         } else {
           Serial.println("Recommended direction not found: ");
           Serial.println(RecommendedDirectionIr);
@@ -557,11 +577,15 @@ void NavigateAndAvoidObstacles(String objective){
         MoveToIrRecommendedDirection("Move towards last known location");
         SetStopWheels("lost signal of the base"); // lost signal of the base, this prevents the scape and prevent to keep collision.
         Serial.println("Lost signal, waiting for one.");
+      } else{
+        SetMoveLeft(2);
+        SetStopWheels("Searching for base");
       }
       if(WheelsGoing && DetectCollisionWithSensors())
       {
         // we redirect here so we can continue on SUB_MODE_REDIRECTING_TOWARDS_BASE
-        Redirect();
+        // Redirect();
+        CurrentSubMode = SUB_MODE_REDIRECTING; // TODO: testing
       }
     }
     else if(CurrentSubMode == SUB_MODE_NAVIGATING)
@@ -577,6 +601,7 @@ void NavigateAndAvoidObstacles(String objective){
           SetMoveBackToLocateIR(10 + CicleCounter);
           Serial.println("Signal Lost, long back track.");
         }
+        SetMoveBackToLocateIR(4);
         SetStopWheels("Signal Lost, long back track.");
       }
       else if(sensorState == 1)
@@ -592,7 +617,8 @@ void NavigateAndAvoidObstacles(String objective){
           MoveToIrRecommendedDirection("Turning towards sensor.");
         }
         MoveFordwardABit(1);
-      } else if(DetectCollisionWithSensors())
+      }
+      if(DetectCollisionWithSensors())
       {
         CurrentSubMode = SUB_MODE_REDIRECTING;
       }
@@ -600,18 +626,21 @@ void NavigateAndAvoidObstacles(String objective){
 }
 
 
+bool bumperCollision = false; // todo:  move
 void Redirect()
 {
     // Collision or redirection
     // Move back enough to not hit anything
     // turn arround
     // time paused depends of the RPM of the motors and how long the mower been stuck
-    int upperLimit = 3;
+    int upperLimit = 6;
     int lowerLimit =  2;
     int wait_time = random(lowerLimit, upperLimit); // wait a bit
-    if(CurrentSubMode != SUB_MODE_REDIRECTING_TOWARDS_BASE)
+    int preventStuck = 10;
+    if(CurrentSubMode != SUB_MODE_REDIRECTING_TOWARDS_BASE || bumperCollision)
     {
       SetMoveBack(random(lowerLimit, upperLimit));
+      wait_time = TimeFor180DegreeTurn;
     } else {
       SetMoveBack(2); // barely.
     }
@@ -622,9 +651,19 @@ void Redirect()
     }
     if(RecommendedDirection == DirectionLeft)
     {
-      SetMoveLeft(wait_time);
+      SetMoveLeft(TimeFor90DegreeTurn);
+      while(ReadUltrasonicSensor() && preventStuck > 0){
+        SetMoveLeft(1);
+        SetStopWheels("Moving and reading distances");
+        preventStuck--;
+      }
     } else if(RecommendedDirection == DirectionRight) {
-      SetMoveRight(wait_time);
+      SetMoveRight(TimeFor90DegreeTurn);
+      while(ReadUltrasonicSensor() && preventStuck > 0){
+        SetMoveRight(1);
+        SetStopWheels("Moving and reading distances");
+        preventStuck--;
+      }
     } else if(RecommendedDirection == DirectionBack)
     {
       SetMoveRight(TimeFor180DegreeTurn);
@@ -633,6 +672,7 @@ void Redirect()
     // continue for next cicle
     CurrentSubMode = SUB_MODE_NAVIGATING;
     CicleCounter=0;
+    bumperCollision = false;
 }
 
 bool MakeSureVoltageIsLessThan(int minimum){
@@ -808,10 +848,15 @@ void loop()
 {
   if(CurrentMode == MODE_MOWING) {
      NavigateAndAvoidObstacles("MOWING");
-     if(WheelsGoing == false && !DetectCollisionWithSensors() && ReadIrSensor() > 1)
+     if(WheelsGoing == false && !DetectCollisionWithSensors() && ReadIrSensor() > 0)
      {
       Serial.println("Move forward since MODE_MOWING.");
       SetMoveFront();
+     } else if( WheelsGoing == false && DetectCollisionWithSensors())
+     {  
+        SetMoveBack(3);
+        delay(500);
+        SetStopWheels("Release ReadBumperSensors");
      }
      CutGrass();
   }
@@ -853,44 +898,20 @@ void loop()
     digitalWrite(RedLedPin, LOW);
     digitalWrite(BlueLedPin, LOW);
   }
-  if(CicleCounter > 0 && CicleCounter%30 == 0)
+  if((CicleCounter > 0 && CicleCounter%30 == 0) || !WheelsGoing)
   {
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
+  }
+  if(CicleCounter> 0  && CicleCounter%100==0)
+  {
     DontLoseIrBaseOfSight();
   }
-  if(GetBatteryVoltage() < 10)
-  { 
-    BatteryProtectionTriggeredStop = WheelsGoing;
-    SetStopWheels("Battery protection triggered");
-    BlinkLedPin(RedLedPin, 2);
-    Serial.println("Battery protection triggered");
-  } else if (BatteryProtectionTriggeredStop) {
-    BatteryProtectionTriggeredStop = false;
-    SetMoveFront();
-  }
+
+  ProtectBattery();
+  ProtectBumpers();
   SensorRunCicle++;
   CicleCounter++;
   Serial.println(CicleCounter);
-
-  if(CicleCounter>0 && CicleCounter%30==0 && WheelsGoing)
-  {
-    SetStopWheels("ReadFenceSensors.");
-    delay(500);
-    BlinkLedPin(BlueLedPin, 3);
-    if(ReadFenceSensors())
-    {
-      CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
-    } else{
-      SetMoveFront();
-    }
-    CutGrass();
-  }
   
-  if(WheelsGoing && (ReadBumperSensors() || ReadUltrasonicSensor(5)))
-  {
-    SetMoveBack(3);
-    delay(500);
-    SetStopWheels("Emergency stop ReadBumperSensors");
-  }
 }
