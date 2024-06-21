@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <SoftwareSerial.h>
 
 /*
 Pins used:
@@ -178,9 +177,10 @@ void SetMoveBackToLocateIR(int time){
   SetMoveLeftMotor(-1);
   SetMoveRightMotor(-1);
   delay(1000); // initial delay to help remove preassure
+  time = time * 2;
   while(time>0 && !ReadBumperSensors() && ReadIrSensor()==0)
   {
-    delay(1000);
+    delay(500);
     time--;
   }
   if(!ActIfBumperStuck() && ReadIrSensor()>0)
@@ -199,10 +199,11 @@ void SetMoveBack(int time){
 void MovingWhileDetectedBumperStuck(int time){
   // this function allows side or backwards movement
   // while monitoring the bumpers without interrupts
-  delay(1000); // initial delay to help remove preassure from button
+  delay(500); // initial delay to help remove preassure from button
+  time = time * 2;
   while(time>0 && !ReadBumperSensors())
   {
-    delay(1000);
+    delay(500);
     time--;
   }
   ActIfBumperStuck();
@@ -252,7 +253,7 @@ int MulticheckUltrasonicDistance(int sensor)
 
 boolean ReadUltrasonicSensor()
 {
- return ReadUltrasonicSensor(20);
+ return ReadUltrasonicSensor(25);
 }
 
 boolean ReadUltrasonicSensor(int distanceAllowed){
@@ -299,17 +300,17 @@ int ReadIrSensor(){
   while(readings)
   {
     readings--;
-    if(analogIrLeft < 900) {
+    if(analogIrLeft < 800) {
       detectedLeft++;
     }
-    if(analogIrRight < 900) {
+    if(analogIrRight < 800) {
       detectedRight++;
     }
-    if(analogIrBack < 1000)
+    if(analogIrBack < 800)
     {
       detectedBack++;
     }
-    if(analogIrFront < 1000)
+    if(analogIrFront < 800)
     {
       detectedFront++;
     }
@@ -318,10 +319,11 @@ int ReadIrSensor(){
     analogIrBack = analogRead(IrSensorPinBack);
     analogIrFront = analogRead(IrSensorPinFront);
   }
-  String debug1 = "Evaluated with [ R: ";
+  String debug1 = "IRReadings [ R: ";
   debug1 = debug1 + detectedRight + " L: - ";
   debug1 =  debug1 + detectedLeft + " B: - ";
-  debug1 =  debug1 + detectedBack + "]";
+  debug1 =  debug1 + detectedBack + " F: - ";
+  debug1 =  debug1 + detectedFront + "]";
   Serial.println(debug1);
 
   if(detectedLeft>threshold && detectedRight>threshold && detectedFront > threshold) {
@@ -351,6 +353,7 @@ int ReadIrSensor(){
     Serial.println("Detected in the back!");
     if(detectedSides == 0)
     {
+      Serial.println("Detected in the back ONLY!");
       // only detected in the back
       RecommendedDirectionIr = DirectionBack;
       RecommendedDirection = DirectionBack;
@@ -361,51 +364,61 @@ int ReadIrSensor(){
   return detectedSides;
 }
 
-boolean ReadFenceSensors(){
-  Serial.println("Evaluating Fence");
-  int left = analogRead(FencereaderPinLeft);
+// Function to smooth analog readings
+int smoothAnalogRead(int pin) {
+  int total = 0;
+  for (int i = 0; i < 5; i++) { // Average 5 readings
+    total += analogRead(pin);
+  }
+  return total / 5;
+}
+const int thresholdReadings = 755; // Adjust based on actual readings
+const int thresHoldLowerTimes = 4; // Number of minimum positive detections needed
+const int thresHoldUpperTimes = 135; // Upper limmit of positive detections (noise)
+const int attempts = 300; // Number of attempts for detection
+boolean ReadFenceSensors() {
   int leftPositives = 0;
   int rightPositives = 0;
-  int thresholdReadings = 900; // TODO: adjust
-  int thresHoldTimes = 150;
-  int attempts = 300;
-  int attemptsL = attempts;
-  while (attemptsL> 0)
-  {
-    if(left > thresholdReadings)
-    {
-      Serial.println("Fence detected Left ");
-      Serial.println(left);
+  int averageReadingL = 0;
+  int averageReadingR = 0;
+
+  // Read left sensor
+  for (int i = 0; i < attempts; i++) {
+    int left = smoothAnalogRead(FencereaderPinLeft);
+    averageReadingL += left;
+    if (left > thresholdReadings) {
       leftPositives++;
-      // return true;
     }
-    left = analogRead(FencereaderPinLeft);
-    attemptsL--;
   }
-  int right = analogRead(FencereaderPinRight);
-  int attemptsR = attempts;
-  while (attemptsR> 0)
-  {
-    if (right > thresholdReadings)
-    {
-      Serial.println("Fence detected Right ");
-      Serial.println(right);
+
+  // Read right sensor
+  for (int i = 0; i < attempts; i++) {
+    int right = smoothAnalogRead(FencereaderPinRight);
+    averageReadingR += right;
+    if (right > thresholdReadings) {
       rightPositives++;
     }
-    right = analogRead(FencereaderPinRight);
-    attemptsR--;
   }
-  if(leftPositives > rightPositives)
-  {
+
+  // Determine recommended direction
+  if (leftPositives > rightPositives) {
     RecommendedDirection = DirectionLeft;
   } else {
     RecommendedDirection = DirectionRight;
   }
-  Serial.print(left);
-  Serial.print(" -- ");
-  Serial.print(right);
-  Serial.println(" - ");
-  return leftPositives > thresHoldTimes || rightPositives > thresHoldTimes;
+
+  // Print results for debugging
+  Serial.print("Av L: ");
+  Serial.print(averageReadingL/(attempts*2));
+  Serial.print("Av R: ");
+  Serial.print(averageReadingR/(attempts*2));
+  Serial.print("Left positives: ");
+  Serial.print(leftPositives);
+  Serial.print(" | Right positives: ");
+  Serial.println(rightPositives);
+
+  // Return true if either sensor detected enough positives
+  return ( thresHoldUpperTimes > leftPositives && leftPositives > thresHoldLowerTimes) || (  thresHoldUpperTimes > rightPositives &&  rightPositives > thresHoldLowerTimes );
 }
 
 
@@ -434,9 +447,9 @@ void setup()
 }
 
 bool ReadBumperSensors(){
-  StateBumperLeft = digitalRead(BumperButtonLeft);
+  StateBumperLeft = digitalRead(BumperButtonLeft); // Due to hardware available bumper switch is different.
   StateBumperRight = digitalRead(BumperButtonRight);
-  if(StateBumperLeft == LOW){
+  if(StateBumperLeft == HIGH){
     RecommendedDirection = DirectionRight;
     return true;
   }
@@ -537,13 +550,46 @@ void ProtectBumpers() {
   }
 }
 
+bool DetectWireBoundary(){
+  if(WheelsGoing){
+    int positiveDetection = 0;
+    int reads = 10;
+    int confirmedTimes = 0;
+    int confirmationValue = 5;
+    bool detected = ReadFenceSensors();
+    if(detected)
+    {
+      // if the first detection worked, then multiple polling should help to confirm:
+      // eventually multiplying the total polling by more than a 1000 times.
+      SetStopWheels("Stopped wheels to confirm detection of boundary wire");
+      while(reads > 0 && confirmedTimes<confirmationValue)
+      {
+        detected = ReadFenceSensors();
+        if(detected){
+          confirmedTimes++;
+        }
+        reads--;
+      }
+      if(confirmedTimes>=confirmationValue)
+      {
+        Serial.println("Detected Wire Fence");
+        SetMoveBack(5);
+        Redirect();
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void MoveFordwardABit(int seconds){
   SetMoveFront(); // move front just a bit for better view.
+  seconds = seconds* 2;
   while(seconds>0)
   {
     if(!DetectCollisionWithSensors())
     {
-      delay(1000);
+      delay(500);
     } else {
       SetStopWheels("Move forward a bit - Collision.");
     }
@@ -555,6 +601,10 @@ void MoveFordwardABit(int seconds){
 void NavigateAndAvoidObstacles(String objective){
     if (CurrentSubMode == SUB_MODE_REDIRECTING)
     {
+      int irSensorState = ReadIrSensor();
+      if(irSensorState>2){
+        Redirect(); // twice if is very close to the base
+      }
       Redirect();
       CutGrass();
     }
@@ -593,32 +643,32 @@ void NavigateAndAvoidObstacles(String objective){
     else if(CurrentSubMode == SUB_MODE_NAVIGATING)
     {
       // Check sensors
-      int sensorState = ReadIrSensor();
-      if(sensorState==0) // not detected, we have to turn back or try to turn towards it when detected
+      int irSensorState = ReadIrSensor();
+      if(irSensorState==0) // not detected, we have to turn back or try to turn towards it when detected
       {
         CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
-        if(CicleCounter > 10)
+        if(CicleCounter > 10 && WheelsGoing)
         {
           // only move back if has been traveling some time ( # cycles )
           SetMoveBackToLocateIR(10 + CicleCounter);
           Serial.println("Signal Lost, long back track.");
         }
         SetMoveBackToLocateIR(4);
-        SetStopWheels("Signal Lost, long back track.");
+        SetStopWheels("Signal Lost, long back track (?).");
       }
-      else if(sensorState == 1)
+      else if(irSensorState == 1)
       {
         if(RecommendedDirectionIr == DirectionBack)
         {
           // we only have contact in the back, we have to turn around until we have good
           CurrentSubMode = SUB_MODE_REDIRECTING_TOWARDS_BASE;
           MoveToIrRecommendedDirection("Returning to area.");
-        } else {
+        } else if(RecommendedDirectionIr == DirectionCenter){
           // we only have contact with one sensor, so we turn to that sensor side
           // it is expected to have good contact with the IR, so more than 1 sensor.
-          MoveToIrRecommendedDirection("Turning towards sensor.");
+          MoveToIrRecommendedDirection("Turning towards sensor. Only detected by one sensor.");
         }
-        MoveFordwardABit(1);
+        SetMoveFront();
       }
       if(DetectCollisionWithSensors())
       {
@@ -799,7 +849,7 @@ bool MoveToIrRecommendedDirection(String debug){
       else if(RecommendedDirectionIr == DirectionBack){
         SetMoveBack(10);
         SetMoveRight(TimeFor180DegreeTurn);
-        Serial.println("Trying to turn back");
+        Serial.println("Recommended direction is back: Trying to turn back");
         RecommendedDirectionIr = DirectionNone;
         return true;
       } else {
@@ -827,30 +877,61 @@ void DontLoseIrBaseOfSight(){
   // so it does not lose sight of it
     if(CurrentSubMode == SUB_MODE_NAVIGATING)
     {
-      if(ReadIrSensor() > 0)
+      int irReading = ReadIrSensor();
+      if(irReading > 0)
       {
         // already in sight
-        if(RecommendedDirectionIr != DirectionCenter)
+        if(RecommendedDirectionIr != DirectionCenter && irReading <= 2)
         {
           if(MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 1")){
             MoveFordwardABit(1);
           }
         }
-        if(RecommendedDirectionIr == DirectionBack)
+        else if(RecommendedDirectionIr == DirectionBack)
         {
             SetMoveBack(10);
             MoveToIrRecommendedDirection("DontLoseIrBaseOfSight 2");
             MoveFordwardABit(1);
         }
+        else if (RecommendedDirectionIr == DirectionCenter && irReading > 1)
+        {
+          // the front sensor has good view of the base, so this will attemp to make it explore in the opposing way.
+          SetMoveRight( TimeFor180DegreeTurn );
+        }
       }
     }
+}
+
+void AttemptToRecover()
+{
+  //Check all the sensors and attempt to keep working:
+  if(ReadIrSensor() > 0)
+  {
+    if(ReadBumperSensors() || ReadUltrasonicSensor())
+    {
+      SetMoveBack(1);
+      SetStopWheels("AttemptToRecover Stop");
+    } else {
+      if(CurrentBatteryPercentage>20)
+      {
+        SetMoveBack(3);
+        SetMoveRightMotor(TimeFor180DegreeTurn);
+        SetMoveFront();
+        CurrentMode = MODE_MOWING;
+        CurrentSubMode = SUB_MODE_NAVIGATING;
+      } else {
+        Serial.println("Battery a bit low to continue working");
+      }
+    }
+  }
+
 }
 
 void loop()
 {
   if(CurrentMode == MODE_MOWING) {
      NavigateAndAvoidObstacles("MOWING");
-     if(WheelsGoing == false && !DetectCollisionWithSensors() && ReadIrSensor() > 0)
+     if(WheelsGoing == false && !DetectCollisionWithSensors() && ReadIrSensor() > 0 && !ReadFenceSensors())
      {
       Serial.println("Move forward since MODE_MOWING.");
       SetMoveFront();
@@ -899,21 +980,23 @@ void loop()
     delay(2000);
     digitalWrite(RedLedPin, LOW);
     digitalWrite(BlueLedPin, LOW);
+    AttemptToRecover();
   }
-  if((CicleCounter > 0 && CicleCounter%30 == 0) || !WheelsGoing)
+  if((CicleCounter > 0 && CicleCounter%40 == 0) || !WheelsGoing)
   {
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
-  }
-  if(CicleCounter> 0  && CicleCounter%100==0)
-  {
-    DontLoseIrBaseOfSight();
+    if(WheelsGoing)
+    {
+      DontLoseIrBaseOfSight();
+      Serial.println("Dont loseIR out of sight.");
+    }
   }
 
   ProtectBattery();
   ProtectBumpers();
+  DetectWireBoundary();
   SensorRunCicle++;
   CicleCounter++;
   Serial.println(CicleCounter);
-  
 }
