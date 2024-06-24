@@ -370,9 +370,9 @@ int ReadIrSensor(){
 
 // Function to smooth analog readings
 int smoothAnalogRead(int pin) {
-  int totalReadings = 3;
+  int totalReadings = 1;
   int total = 0;
-  for (int i = 0; i < totalReadings; i++) { // Average 5 readings
+  for (int i = 0; i < totalReadings; i++) { // Average readings
     total += analogRead(pin);
   }
   return total / totalReadings;
@@ -444,7 +444,7 @@ const int thresHoldUpperTimes = 135; // Upper limmit of positive detections (noi
   delay(5000);
 }
 const int thresHoldLowerTimes = 4; // Number of minimum positive detections needed
-int thresHoldUpperTimes = 135; // Upper limmit of positive detections (noise)
+int thresHoldUpperTimes = 100; // Upper limmit of positive detections (noise)
 const int attempts = 300; // Number of attempts for detection
 boolean ReadFenceSensors() {
   int leftPositives = 0;
@@ -623,6 +623,9 @@ void ProtectBattery(){
   if(GetBatteryVoltage() < 10)
   { 
     BatteryProtectionTriggeredStop = WheelsGoing;
+    if(WheelsGoing){
+      SetMoveBack(5);
+    }
     SetStopWheels("Battery Protection.");
     BlinkLedPin(RedLedPin, 2);
   } else if (BatteryProtectionTriggeredStop) {
@@ -998,7 +1001,7 @@ void AttemptToRecover()
   {
     if(ReadBumperSensors() || ReadUltrasonicSensor())
     {
-      SetMoveBack(1);
+      SetMoveBack(5);
       SetStopWheels("AttemptToRecover Stop");
     } else {
       if(CurrentBatteryPercentage>20)
@@ -1031,13 +1034,13 @@ void loop()
         SetMoveLeft(TimeFor180DegreeTurn);
         SetMoveFront();
       } else {
+        // it was stopped, but we attempt to keep it moving
         Serial.println("Move forward since MODE_MOWING.");
         SetMoveFront();
       }
      } else if( WheelsGoing == false && DetectCollisionWithSensors())
      {  
-        SetMoveBack(3);
-        delay(500);
+        SetMoveBack(10);
         SetStopWheels("Release ReadBumperSensors");
      }
      CutGrass();
@@ -1058,14 +1061,15 @@ void loop()
   else if(CurrentMode == MODE_RESTING)
   {
     SetStopWheels("MODE_RESTING");
+    Serial.println("Battery at:" + CurrentBatteryPercentage);
     digitalWrite(BlueLedPin, LOW);
     digitalWrite(RedLedPin, LOW);
     BlinkLedPin(RedLedPin, 3);
-    Serial.println("Resting Mode, battery at:" + CurrentBatteryPercentage);
   }
   else if(CurrentMode == MODE_CHARGING)
   {
     SetStopWheels("MODE_CHARGING");
+    Serial.println("Battery at:" + CurrentBatteryPercentage);
     BlinkLedPin(RedLedPin, CurrentBatteryPercentage/10);
     Serial.println("Low Battery - Charging");
     SensorRunCicle = 0;
