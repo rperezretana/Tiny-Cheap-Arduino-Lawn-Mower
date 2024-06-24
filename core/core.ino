@@ -280,6 +280,19 @@ boolean ReadUltrasonicSensor(int distanceAllowed){
   return collisionDetected;
 }
 
+void debugIrSensors(int detectedRight, int detectedLeft, int detectedBack, int detectedFront) {
+  Serial.print("IR [ R: ");
+  Serial.print(detectedRight);
+  Serial.print(" L: ");
+  Serial.print(detectedLeft);
+  Serial.print(" B: ");
+  Serial.print(detectedBack);
+  Serial.print(" F: ");
+  Serial.print(detectedFront);
+  Serial.println("]");
+}
+
+
 int ReadIrSensor(){
   // in order to consider detected, 2 sensors have to have detected it.
   // if only one sensor has it in range, it is required that the rover does not lose that signal,
@@ -319,33 +332,24 @@ int ReadIrSensor(){
     analogIrBack = analogRead(IrSensorPinBack);
     analogIrFront = analogRead(IrSensorPinFront);
   }
-  String debug1 = "IRReadings [ R: ";
-  debug1 = debug1 + detectedRight + " L: - ";
-  debug1 =  debug1 + detectedLeft + " B: - ";
-  debug1 =  debug1 + detectedBack + " F: - ";
-  debug1 =  debug1 + detectedFront + "]";
-  Serial.println(debug1);
+  debugIrSensors(detectedRight, detectedLeft, detectedBack, detectedFront);
 
   if(detectedLeft>threshold && detectedRight>threshold && detectedFront > threshold) {
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
-    Serial.println("Detected IR Center");
     detectedSides = 3;
   } else if(detectedFront > threshold){
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
-    Serial.println("Detected IR Front");
     detectedSides++;
   } else if (detectedRight > threshold){
     RecommendedDirectionIr = DirectionRight;
     RecommendedDirection = DirectionRight;
-    Serial.println("Detected IR Right");
     detectedSides++;
   } else if (detectedLeft > threshold){
     RecommendedDirectionIr = DirectionLeft;
     RecommendedDirection = DirectionLeft;
-    Serial.println("Detected IR Left");
     detectedSides++;
   }
 
@@ -366,15 +370,81 @@ int ReadIrSensor(){
 
 // Function to smooth analog readings
 int smoothAnalogRead(int pin) {
+  int totalReadings = 3;
   int total = 0;
-  for (int i = 0; i < 5; i++) { // Average 5 readings
+  for (int i = 0; i < totalReadings; i++) { // Average 5 readings
     total += analogRead(pin);
   }
-  return total / 5;
+  return total / totalReadings;
 }
+
+const int boundaryCalibrationAttempts = 100; // Number of readings during calibration
+// Other calibration variables
+int baseLeftReading = 0;
+int baseRightReading = 0;
+int thresholdReadings = 97; //755; // Adjust based on actual readings
+void SetUpAndCalibrateBoundaryValues(){
+/*
+It is assumed the lawnmower starts on top of the boudary wire. 
+It will take readings and set up the values to detect the wire,
+then it will move backwards and set the values for when the wire is  not detected.
 const int thresholdReadings = 755; // Adjust based on actual readings
-const int thresHoldLowerTimes = 4; // Number of minimum positive detections needed
 const int thresHoldUpperTimes = 135; // Upper limmit of positive detections (noise)
+ */
+  int leftSum = 0;
+  int rightSum = 0;
+  
+  // SetMoveBack to include the motors in the readings
+  CutGrass();
+  SetMoveLeftMotor(-1);
+  SetMoveRightMotor(-1);
+  
+  // Take readings directly over the boundary wire
+  for (int i = 0; i < boundaryCalibrationAttempts; i++) {
+    leftSum += smoothAnalogRead(FencereaderPinLeft);
+    rightSum += smoothAnalogRead(FencereaderPinRight);
+    delay(10); // Small delay between readings
+  }
+  
+  baseLeftReading = leftSum / boundaryCalibrationAttempts;
+  baseRightReading = rightSum / boundaryCalibrationAttempts;
+  
+  Serial.println("Done calibration part 1.");
+  SetMoveBack(50);
+  SetMoveLeft(TimeFor180DegreeTurn);
+  Serial.println("Starts calibration part 2.");
+  
+  leftSum = 0;
+  rightSum = 0;
+  
+  for (int i = 0; i < boundaryCalibrationAttempts; i++) {
+    leftSum += smoothAnalogRead(FencereaderPinLeft);
+    rightSum += smoothAnalogRead(FencereaderPinRight);
+    delay(10); // Small delay between readings
+  }
+  
+  int outLeftReading = leftSum / boundaryCalibrationAttempts;
+  int outRightReading = rightSum / boundaryCalibrationAttempts;
+  
+  // Calculate threshold as a midpoint between in-boundary and out-boundary readings
+  thresholdReadings = (baseLeftReading + baseRightReading + outLeftReading + outRightReading) / 4;
+  
+  SetStopWheels("Done calibration part 2.");
+  Serial.print("Base Left: ");
+  Serial.print(baseLeftReading);
+  Serial.print(" | Base Right: ");
+  Serial.print(baseRightReading);
+  Serial.print(" | Out Left: ");
+  Serial.print(outLeftReading);
+  Serial.print(" | Out Right: ");
+  Serial.print(outRightReading);
+  Serial.print(" | Threshold: ");
+  Serial.println(thresholdReadings);
+  Serial.println("Starts in... 5s.");
+  delay(5000);
+}
+const int thresHoldLowerTimes = 4; // Number of minimum positive detections needed
+int thresHoldUpperTimes = 135; // Upper limmit of positive detections (noise)
 const int attempts = 300; // Number of attempts for detection
 boolean ReadFenceSensors() {
   int leftPositives = 0;
@@ -385,8 +455,8 @@ boolean ReadFenceSensors() {
   // Read left sensor
   for (int i = 0; i < attempts; i++) {
     int left = smoothAnalogRead(FencereaderPinLeft);
-    averageReadingL += left;
-    if (left > thresholdReadings) {
+    averageReadingL = averageReadingL + left;
+    if (left < thresholdReadings) {
       leftPositives++;
     }
   }
@@ -394,8 +464,8 @@ boolean ReadFenceSensors() {
   // Read right sensor
   for (int i = 0; i < attempts; i++) {
     int right = smoothAnalogRead(FencereaderPinRight);
-    averageReadingR += right;
-    if (right > thresholdReadings) {
+    averageReadingR = averageReadingR + right;
+    if (right < thresholdReadings) {
       rightPositives++;
     }
   }
@@ -408,17 +478,37 @@ boolean ReadFenceSensors() {
   }
 
   // Print results for debugging
+  int avrL = (averageReadingL/attempts);
+  int avrR = (averageReadingR/attempts);
   Serial.print("Av L: ");
-  Serial.print(averageReadingL/(attempts*2));
+  Serial.print(avrL);
   Serial.print("Av R: ");
-  Serial.print(averageReadingR/(attempts*2));
-  Serial.print("Left positives: ");
+  Serial.print(avrR);
+  Serial.print("Le Pos: ");
   Serial.print(leftPositives);
-  Serial.print(" | Right positives: ");
+  Serial.print(" | Ri Pos: ");
   Serial.println(rightPositives);
 
   // Return true if either sensor detected enough positives
   return ( thresHoldUpperTimes > leftPositives && leftPositives > thresHoldLowerTimes) || (  thresHoldUpperTimes > rightPositives &&  rightPositives > thresHoldLowerTimes );
+}
+
+void CalibrationOfBoundaryWire(){
+  delay(10000);
+  Serial.println("5");
+  delay(1000);
+  Serial.println("4");
+  delay(1000);
+  Serial.println("3");
+  delay(1000);
+  Serial.println("2");
+  delay(1000);
+  Serial.println("1");
+  delay(1000);
+  Serial.println("Initializing readings for calibration");
+  SetUpAndCalibrateBoundaryValues();
+  Serial.println("Finalized calibration. Starts in 5s.");
+  delay(5000);
 }
 
 
@@ -442,6 +532,7 @@ void setup()
   digitalWrite(BlueLedPin, HIGH);
   digitalWrite(RedLedPin, HIGH);
 
+  // CalibrationOfBoundaryWire();
   CurrentSubMode = SUB_MODE_NAVIGATING;
   CurrentMode = MODE_MOWING;
 }
@@ -532,9 +623,8 @@ void ProtectBattery(){
   if(GetBatteryVoltage() < 10)
   { 
     BatteryProtectionTriggeredStop = WheelsGoing;
-    SetStopWheels("Battery protection triggered");
+    SetStopWheels("Battery Protection.");
     BlinkLedPin(RedLedPin, 2);
-    Serial.println("Battery protection triggered");
   } else if (BatteryProtectionTriggeredStop) {
     BatteryProtectionTriggeredStop = false;
     SetMoveFront();
@@ -555,7 +645,7 @@ bool DetectWireBoundary(){
     int positiveDetection = 0;
     int reads = 10;
     int confirmedTimes = 0;
-    int confirmationValue = 5;
+    int confirmationValue = 4;
     bool detected = ReadFenceSensors();
     if(detected)
     {
@@ -599,13 +689,17 @@ void MoveFordwardABit(int seconds){
 
 
 void NavigateAndAvoidObstacles(String objective){
+  Serial.println(objective);
     if (CurrentSubMode == SUB_MODE_REDIRECTING)
     {
       int irSensorState = ReadIrSensor();
-      if(irSensorState>2){
-        Redirect(); // twice if is very close to the base
+      if(irSensorState > 2 && RecommendedDirection == DirectionCenter){
+        // Close to the sensor, turn back to navigate away
+        SetMoveRight(TimeFor180DegreeTurn);
       }
-      Redirect();
+      else{
+        Redirect();
+      }
       CutGrass();
     }
     else if(CurrentSubMode == SUB_MODE_REDIRECTING_TOWARDS_BASE)
@@ -620,8 +714,7 @@ void NavigateAndAvoidObstacles(String objective){
         } else if(RecommendedDirectionIr != DirectionNone) {
           MoveToIrRecommendedDirection("SUB_MODE_REDIRECTING_TOWARDS_BASE 1");
         } else {
-          Serial.println("Recommended direction not found: ");
-          Serial.println(RecommendedDirectionIr);
+          Serial.println("Recommended direction not found. ");
         }
         MoveFordwardABit(1);
         CutGrass();
@@ -728,7 +821,6 @@ void Redirect()
 }
 
 bool MakeSureVoltageIsLessThan(int minimum){
-    Serial.println("DC voltage "+ minimum);
     int timesToCheck = 3;
     CicleCounter = 10;
     while (timesToCheck > 0)
@@ -773,10 +865,8 @@ void SetModeByBatteryPercentage() {
           // Stop moving if battery is lower than x%
           // Stop all action and blink for help
           CurrentMode = MODE_RESTING;
-          Serial.println(CicleCounter);
-          Serial.println(" - Battery less than 5%: ");
-          Serial.println(CurrentBatteryPercentage);
-          SetStopWheels("Low battery");
+          Serial.println(CicleCounter + " - Battery less than 5%: ");
+          SetStopWheels("Low battery: "+CurrentBatteryPercentage);
           BlinkLedPin(RedLedPin, 2);
           BlinkLedPin(BlueLedPin, 2);
         } else {
@@ -792,8 +882,7 @@ void SetModeByBatteryPercentage() {
     {
       CurrentMode = MODE_RETURNING_HOME;
       CurrentSubMode = SUB_MODE_NAVIGATING;
-      Serial.println("RETURNING HOME");
-      Serial.println(CurrentBatteryPercentage);
+      Serial.println(CurrentBatteryPercentage + "% BATT. RETURNING HOME");
       digitalWrite(BlueLedPin, LOW);
       digitalWrite(RedLedPin, HIGH);
     }
@@ -929,12 +1018,22 @@ void AttemptToRecover()
 
 void loop()
 {
+  Serial.print("CicleCounter: ");
+  Serial.println(CicleCounter);
   if(CurrentMode == MODE_MOWING) {
      NavigateAndAvoidObstacles("MOWING");
-     if(WheelsGoing == false && !DetectCollisionWithSensors() && ReadIrSensor() > 0 && !ReadFenceSensors())
+     int irsensor = ReadIrSensor();
+     if(WheelsGoing == false && !DetectCollisionWithSensors() && irsensor > 0 && !ReadFenceSensors())
      {
-      Serial.println("Move forward since MODE_MOWING.");
-      SetMoveFront();
+      if(RecommendedDirectionIr == DirectionCenter && irsensor >= 3){
+        Serial.println("Attempts to turn arround since it seems too south.");
+        SetMoveBack(5);
+        SetMoveLeft(TimeFor180DegreeTurn);
+        SetMoveFront();
+      } else {
+        Serial.println("Move forward since MODE_MOWING.");
+        SetMoveFront();
+      }
      } else if( WheelsGoing == false && DetectCollisionWithSensors())
      {  
         SetMoveBack(3);
@@ -962,8 +1061,7 @@ void loop()
     digitalWrite(BlueLedPin, LOW);
     digitalWrite(RedLedPin, LOW);
     BlinkLedPin(RedLedPin, 3);
-    String deb1 = CicleCounter+" Resting Mode, battery at:" + CurrentBatteryPercentage;
-    Serial.println(deb1);
+    Serial.println("Resting Mode, battery at:" + CurrentBatteryPercentage);
   }
   else if(CurrentMode == MODE_CHARGING)
   {
@@ -982,7 +1080,7 @@ void loop()
     digitalWrite(BlueLedPin, LOW);
     AttemptToRecover();
   }
-  if((CicleCounter > 0 && CicleCounter%40 == 0) || !WheelsGoing)
+  if((CicleCounter > 0 && CicleCounter%100 == 0) || !WheelsGoing)
   {
     GetBatteryVoltage();
     SetModeByBatteryPercentage();
@@ -998,5 +1096,4 @@ void loop()
   DetectWireBoundary();
   SensorRunCicle++;
   CicleCounter++;
-  Serial.println(CicleCounter);
 }
