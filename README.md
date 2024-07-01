@@ -15,6 +15,7 @@ Scalable Design: Modular components and code structure for easy expansion and mo
 * 37mm Diameter DC Geared Motor
 * IR Sensors (x4)
 * Bluetooth Module ( for debugging).
+* LM358 for debugging ( some resistors to make a non-inverted amplifier with the IC ).
 * IR Lamp
 
 ![image](https://github.com/rperezretana/Tiny-Cheap-Arduino-Lawn-Mower/assets/2858366/d70abb5f-f2c5-4f14-83b4-718e7b83d9e7)
