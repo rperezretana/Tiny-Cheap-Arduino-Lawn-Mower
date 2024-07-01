@@ -19,7 +19,7 @@ Scalable Design: Modular components and code structure for easy expansion and mo
 
 ![image](https://github.com/rperezretana/Tiny-Cheap-Arduino-Lawn-Mower/assets/2858366/d70abb5f-f2c5-4f14-83b4-718e7b83d9e7)
 
-[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/03dL16k8Z_A/0.jpg)](https://www.youtube.com/watch?v=03dL16k8Z_A)
+[![Video demo of the lawn mower](https://img.youtube.com/vi/03dL16k8Z_A/0.jpg)](https://www.youtube.com/watch?v=03dL16k8Z_A)
 
 ![image](https://github.com/rperezretana/Tiny-Cheap-Arduino-Lawn-Mower/assets/2858366/c8f6a307-5af5-4a3f-8a12-e7fcdb4d9da3)
 
