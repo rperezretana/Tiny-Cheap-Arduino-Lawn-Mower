@@ -32,6 +32,14 @@ Scalable Design: Modular components and code structure for easy expansion and mo
 ![image](https://github.com/rperezretana/Tiny-Cheap-Arduino-Lawn-Mower/assets/2858366/5b92ccac-73b8-4a3a-b27c-b51e67258a29)
 
 
+## Project Source Code
+
+This is a recently started project, so it might lack the comments, but when the final version is getting closer I will make
+sure to split the files into a more readable version with more comments.
+**baseSender**: has the code for the microcontroller that generates a 41khz signal for the boundary wire.
+**commandCenter**: it detects the boundary wire and it controls the IR lamp to emit a signal to the mower.
+**Core**: this folder has the main code for the mower.
+
 License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
