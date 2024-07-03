@@ -676,10 +676,12 @@ void ProtectBattery(){
       TurnTheOpppositeOfTheIR();
       SetMoveFront();
     }
-    if(IRDetectedSides==2)
+    else if(IRDetectedSides==2)
     {
       MoveToIrRecommendedDirection("ProtectBattery.");
       SetMoveFront();
+    } else{
+      CurrentSubMode == SUB_MODE_REDIRECTING;
     }
   }
 }
