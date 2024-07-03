@@ -53,6 +53,12 @@ int IrSensorPinFront = A3;
 int IrSensorPinRight = A4;
 int IrSensorPinLeft = A5;
 int RecommendedDirectionIr = 0;
+// Array to store IR sensor values
+int IrSensorValues[4] = {0, 0, 0, 0};
+// Enumeration for array indices
+enum { LEFT, RIGHT, BACK, FRONT };
+// How many sides the IR was detected from
+int IRDetectedSides = 0;
 
 
 // bumper buttons
@@ -199,9 +205,9 @@ void SetMoveBack(int time){
 void MovingWhileDetectedBumperStuck(int time){
   // this function allows side or backwards movement
   // while monitoring the bumpers without interrupts
-  delay(500); // initial delay to help remove preassure from button
+  delay(2500); // initial delay to help remove preassure from button
   time = time * 2;
-  while(time>0 && !ReadBumperSensors())
+  while(time>0 && !ReadBumperSensors() && ReadIrSensor()>2)
   {
     delay(500);
     time--;
@@ -303,69 +309,68 @@ int ReadIrSensor(){
   int analogIrFront = analogRead(IrSensorPinFront);
   int readings = 300;
   int threshold = 1; // readings detected, to filter false positives
-  int detectedSides = 0;
-  int detectedLeft = 0;
-  int detectedRight = 0;
-  int detectedBack = 0;
-  int detectedFront = 0;
   // does multiple readings to make sure all sensors capture data
   // TODO: replace by interrupts, it will remove the need of loop
+  IrSensorValues[LEFT]=0;
+  IrSensorValues[BACK]=0;
+  IrSensorValues[FRONT]=0;
+  IrSensorValues[RIGHT]=0;
+  IRDetectedSides = 0;
   while(readings)
   {
     readings--;
     if(analogIrLeft < 800) {
-      detectedLeft++;
+      IrSensorValues[LEFT]++;
     }
     if(analogIrRight < 800) {
-      detectedRight++;
+      IrSensorValues[RIGHT]++;
     }
     if(analogIrBack < 800)
     {
-      detectedBack++;
+      IrSensorValues[BACK]++;
     }
     if(analogIrFront < 800)
     {
-      detectedFront++;
+      IrSensorValues[FRONT]++;
     }
     analogIrLeft = analogRead(IrSensorPinLeft);
     analogIrRight = analogRead(IrSensorPinRight);
     analogIrBack = analogRead(IrSensorPinBack);
     analogIrFront = analogRead(IrSensorPinFront);
   }
-  debugIrSensors(detectedRight, detectedLeft, detectedBack, detectedFront);
+  debugIrSensors(IrSensorValues[RIGHT], IrSensorValues[LEFT], IrSensorValues[BACK], IrSensorValues[FRONT]);
 
-  if(detectedLeft>threshold && detectedRight>threshold && detectedFront > threshold) {
+  if(IrSensorValues[LEFT]>threshold && IrSensorValues[RIGHT]>threshold && IrSensorValues[FRONT] > threshold) {
     // both sensors detect the base signal, so recommends to move fordwardish.
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
-    detectedSides = 3;
-  } else if(detectedFront > threshold){
+    IRDetectedSides = 3;
+  } else if(IrSensorValues[FRONT] > threshold){
     RecommendedDirectionIr = DirectionCenter;
     RecommendedDirection = DirectionCenter;
-    detectedSides++;
-  } else if (detectedRight > threshold){
+    IRDetectedSides++;
+  } else if (IrSensorValues[RIGHT] > threshold){
     RecommendedDirectionIr = DirectionRight;
     RecommendedDirection = DirectionRight;
-    detectedSides++;
-  } else if (detectedLeft > threshold){
+    IRDetectedSides++;
+  } else if (IrSensorValues[LEFT] > threshold){
     RecommendedDirectionIr = DirectionLeft;
     RecommendedDirection = DirectionLeft;
-    detectedSides++;
+    IRDetectedSides++;
   }
 
-  if(detectedBack > threshold){
-    Serial.println("Detected in the back!");
-    if(detectedSides == 0)
+  if(IrSensorValues[BACK] > threshold){
+    if(IRDetectedSides == 0)
     {
       Serial.println("Detected in the back ONLY!");
       // only detected in the back
       RecommendedDirectionIr = DirectionBack;
       RecommendedDirection = DirectionBack;
     }
-    detectedSides++;
+    IRDetectedSides++;
   }
   
-  return detectedSides;
+  return IRDetectedSides;
 }
 
 // Function to smooth analog readings
@@ -619,27 +624,73 @@ int GetBatteryVoltage(){
   return CurrentVoltage;
 }
 
+void TurnTheOpppositeOfTheIR(){
+  // This attemps request the IR to turn the opposite direction of the IR
+  // but always having 2 sensors detecting it
+  // this is a very custom made code, since the IR is at the edge of my garden
+  DetectCollisionWithSensors(); // reads recommended direction to turn
+  int tryCounter = 20; // attemps limited to avoid permanent loop
+  if(RecommendedDirection== DirectionLeft)
+  {
+    ReadIrSensor();
+    while(IrSensorValues[BACK] < 10 && IRDetectedSides > 1 && tryCounter > 0)
+    {
+      SetMoveBack(1);
+      SetMoveLeft( TimeFor90DegreeTurn );
+      SetStopWheels("TurnTheOpppositeOfTheIR 90Turn");
+      ReadIrSensor();
+      tryCounter--;
+    }
+  } else{
+    ReadIrSensor();
+    while(IrSensorValues[BACK] < 10 && IRDetectedSides > 1 && tryCounter > 0)
+    {
+      SetMoveBack(1);
+      SetMoveRight( TimeFor90DegreeTurn );
+      SetStopWheels("TurnTheOpppositeOfTheIR 90Turn");
+      ReadIrSensor();
+      tryCounter--;
+    }
+  }
+  SetMoveFront();
+  CutGrass();
+}
+
 void ProtectBattery(){
   if(GetBatteryVoltage() < 10)
   { 
     BatteryProtectionTriggeredStop = WheelsGoing;
-    if(WheelsGoing){
-      SetMoveBack(5);
+    if(WheelsGoing && IRDetectedSides>2){
+      // more than 2 sides on IR detected, otherwise we might get lost
+      SetMoveBack(20);
     }
     SetStopWheels("Battery Protection.");
     BlinkLedPin(RedLedPin, 2);
   } else if (BatteryProtectionTriggeredStop) {
     BatteryProtectionTriggeredStop = false;
-    SetMoveFront();
+    if(IRDetectedSides>2)
+    {
+      // when battery protection is triggered is usually when
+      // colliding whith something near the IR base, this is very custom to my lawn/garden.
+      // but some times it is triggered when it is going uphill too, so this prevents from getting lost.
+      TurnTheOpppositeOfTheIR();
+      SetMoveFront();
+    }
+    if(IRDetectedSides==2)
+    {
+      MoveToIrRecommendedDirection("ProtectBattery.");
+      SetMoveFront();
+    }
   }
 }
 
 void ProtectBumpers() {
-  if(WheelsGoing && (ReadBumperSensors() || ReadUltrasonicSensor(5)))
+  if(WheelsGoing && (ReadBumperSensors() || ReadUltrasonicSensor(15)))
   {
-    SetMoveBack(3);
+    SetMoveBack(15);
     delay(500);
     SetStopWheels("Emergency stop ReadBumperSensors");
+    TurnTheOpppositeOfTheIR();
   }
 }
 
@@ -697,8 +748,8 @@ void NavigateAndAvoidObstacles(String objective){
     {
       int irSensorState = ReadIrSensor();
       if(irSensorState > 2 && RecommendedDirection == DirectionCenter){
-        // Close to the sensor, turn back to navigate away
-        SetMoveRight(TimeFor180DegreeTurn);
+        // Close to the IR base, turn back to navigate away
+         SetMoveRight(TimeFor180DegreeTurn);
       }
       else{
         Redirect();
@@ -1001,7 +1052,7 @@ void AttemptToRecover()
   {
     if(ReadBumperSensors() || ReadUltrasonicSensor())
     {
-      SetMoveBack(5);
+      SetMoveBack(20);
       SetStopWheels("AttemptToRecover Stop");
     } else {
       if(CurrentBatteryPercentage>20)
