@@ -1,6 +1,6 @@
 # Robotic Lawn Mower
  Arduino nano simple lawnmower.
- My goal is to build a simple robotic lawnmower that costs less than $150 to build. This Robotic Lawn Mower is a robot designed to efficiently navigate and mow a 10x10 meter garden. The mower operates using IR sensors and an IR lamp for orientation, ensuring precise movement and coverage of the garden area. This project showcases a blend of hardware and software engineering, leveraging Arduino for control and Bluetooth for debugging and calibration.
+ My goal is to build a simple robotic lawnmower that costs less than $150 to build. This Robotic Lawn Mower is a robot designed to navigate and mow a 10x10 meter lawn. The mower operates using IR sensors and an IR lamp for orientation, ensuring precise movement and coverage of the garden area. This project showcases a blend of hardware and software engineering, leveraging Arduino for control and Bluetooth for debugging and calibration.
 
 ## Features
 Autonomous Navigation: Utilizes four IR sensors (front, back, left, right) to locate an IR lamp positioned in the southern part of the garden.
